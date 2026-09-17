@@ -7,6 +7,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A device stuck on a distant access point now moves to the near one.** On a
+  network with several access points sharing a name, the device chose once - at
+  the moment it connected - and stayed there however bad the signal became. On
+  the bench it sat on an access point at -73 dBm while another on the same
+  network was at -48. It now checks once a minute and moves when another is
+  clearly better. Moving costs a reconnection: the printers drop and come back
+  within four to fifteen seconds, which is why it only moves for a large
+  difference.
+- **A wrong Wi-Fi password is reported at once** instead of after a 30-second
+  wait, and the log says why a connection was lost rather than only that it
+  was.
+
 ## [1.57.0] - 2026-09-18
 
 ### Fixed

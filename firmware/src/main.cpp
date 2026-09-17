@@ -1400,20 +1400,25 @@ static void staNoSleep() { WiFi.setSleep(false); }
 //
 // A wrong password and a weak signal both surface as WL_CONNECT_FAILED /
 // WL_DISCONNECTED to WiFi.status() - nothing there says which. The disconnect
-// event does: reason 2/15/204 means the credentials themselves were refused,
-// and no amount of retrying fixes that. Everything else (AP not found, beacon
-// timeout, ...) is a radio-side problem that a retry can genuinely resolve.
+// event does, but only for ONE of the three codes that look like it.
+//
+// AUTH_FAIL means the credentials were refused, and no amount of retrying
+// fixes that. AUTH_EXPIRE and HANDSHAKE_TIMEOUT do NOT: a four-way handshake
+// whose frames are lost on a weak link times out exactly like a wrong key, and
+// treating those as a refusal drops somebody at the edge of coverage into the
+// setup portal in two seconds instead of giving them the thirty the timeout
+// exists for - and a portal cannot fix a signal. So only the unambiguous code
+// cuts the wait short; the other two are left to the timeout, which is what
+// they are for.
 static bool wifiReasonIsAuthFailure(uint8_t reason) {
-    return reason == WIFI_REASON_AUTH_EXPIRE
-        || reason == WIFI_REASON_AUTH_FAIL
-        || reason == WIFI_REASON_HANDSHAKE_TIMEOUT;
+    return reason == WIFI_REASON_AUTH_FAIL;
 }
 
 static const char* wifiReasonStr(uint8_t reason) {
     switch (reason) {
         case WIFI_REASON_AUTH_EXPIRE:       return "auth expired";
         case WIFI_REASON_AUTH_FAIL:         return "wrong password";
-        case WIFI_REASON_HANDSHAKE_TIMEOUT: return "handshake timeout (wrong password)";
+        case WIFI_REASON_HANDSHAKE_TIMEOUT: return "handshake timeout (wrong password, or a weak link)";
         case WIFI_REASON_NO_AP_FOUND:       return "AP not found";
         case WIFI_REASON_BEACON_TIMEOUT:    return "beacon timeout (weak signal)";
         case WIFI_REASON_ASSOC_FAIL:        return "association refused";
@@ -1430,14 +1435,25 @@ static void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
                   wifiReasonStr(wifiLastDisconnectReason), wifiLastDisconnectReason);
 }
 
-// ETSI, not a guess: matches the region the device ships to, and caps output
-// at 78 (19.5 dBm) rather than the chip's 802.11b ceiling of 21 dBm - the
-// same number WiFi.setTxPower() below asks for on the 802.11n path this
-// device actually runs, so the two settings agree instead of one silently
-// overriding the other.
-static const wifi_country_t WIFI_COUNTRY_ETSI = {
-    .cc = "FR", .schan = 1, .nchan = 13, .max_tx_power = 78,
-    .policy = WIFI_COUNTRY_POLICY_MANUAL,
+// The country the AP says it is in, not the country we were built in.
+//
+// This firmware installs from a browser and ships wherever someone opens that
+// page. Channels 12 and 13 are not permitted under FCC rules, and
+// WIFI_COUNTRY_POLICY_MANUAL is precisely the mode that IGNORES the country an
+// access point advertises and applies this table instead - so a device pinned
+// to ETSI and carried to the United States would be using two channels it must
+// not. WIFI_COUNTRY_POLICY_AUTO adopts the country from the AP's beacon, which
+// is what a device sold internationally wants, and falls back to this table
+// until it hears one.
+//
+// "01" is the world-safe default: the eleven channels every region allows, at
+// the chip's rated 802.11n ceiling of 19.5 dBm (datasheet Table 6-2) - the
+// same number WiFi.setTxPower() asks for below, so the two agree rather than
+// one silently overriding the other. In Europe the AP's beacon widens this to
+// thirteen on its own.
+static const wifi_country_t WIFI_COUNTRY_DEFAULT = {
+    .cc = "01", .schan = 1, .nchan = 11, .max_tx_power = 78,
+    .policy = WIFI_COUNTRY_POLICY_AUTO,
 };
 
 static void staBegin() {
@@ -1447,7 +1463,7 @@ static void staBegin() {
     WiFi.disconnect(true, true);   // drop the association, erase the cached AP
     delay(50);
     WiFi.mode(WIFI_STA);
-    esp_wifi_set_country(&WIFI_COUNTRY_ETSI);
+    esp_wifi_set_country(&WIFI_COUNTRY_DEFAULT);
     // 40 MHz roughly doubles the raw bit rate this device never uses - a tag
     // scan and an MQTT ping do not need it - and the datasheet prices that
     // width at 9-11 dB of RX sensitivity, MCS-for-MCS (Table 6-4: HT20 MCS7
