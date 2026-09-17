@@ -16,6 +16,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <esp_wifi.h>   // esp_wifi_set_bandwidth(), esp_wifi_set_country() - see staBegin()
 #include <Preferences.h>
 #include <nvs.h>
 #include <LovyanGFX.hpp>
@@ -66,6 +67,9 @@ bool        canvasReady = false;
 
 Preferences nvs;
 String  wifiSsid, wifiPass;
+// Set from ARDUINO_EVENT_WIFI_STA_DISCONNECTED, reset to 0 (no reason codes
+// use it) at the start of every staBegin() - see wifiReasonIsAuthFailure().
+static volatile uint8_t wifiLastDisconnectReason = 0;
 PrinterCfg printers[MAX_PRINTERS];
 int     selectedPrinter = 0;
 // Send was pressed on the review screen and is waiting, briefly, for the
@@ -104,6 +108,8 @@ static const uint32_t LINK_GIVEUP_RETRY_MS = 60000;
 bool webStarted = false;
 static void staNoSleep();          // defined beside LOOP_WDT_S
 static void staBegin();            // likewise
+static bool wifiReasonIsAuthFailure(uint8_t reason);   // likewise
+static const char* wifiReasonStr(uint8_t reason);      // likewise
 
 enum State { ST_LANG, ST_WIFI, ST_AP, ST_ACCOUNT, ST_SETTINGS, ST_PICK, ST_SET_WIFI, ST_SET_ACCOUNT, ST_SET_SCREEN,
              ST_SET_UPDATE, ST_SET_RESTART, ST_SET_FACTORY, ST_PRINTER, ST_GRID, ST_SCAN, ST_REVIEW, ST_RESULT,
@@ -572,6 +578,11 @@ static bool wifiConnect() {
     uint32_t t0 = millis();
     int lastLeft = -1;
     while (WiFi.status() != WL_CONNECTED && millis() - t0 < WIFI_TIMEOUT_MS) {
+        // A wrong password fails the same way every retry the driver makes on
+        // its own - waiting out the rest of 30 s only delays the portal that
+        // is the actual fix. A weak or absent AP gets the full timeout, since
+        // that one can genuinely resolve itself a few seconds in.
+        if (wifiReasonIsAuthFailure(wifiLastDisconnectReason)) break;
         int left = (int)((WIFI_TIMEOUT_MS - (millis() - t0)) / 1000) + 1;
         if (left != lastLeft) {
             lastLeft = left;
@@ -581,7 +592,9 @@ static bool wifiConnect() {
         delay(5);
     }
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[wifi] timeout after 30 s with no connection");
+        Serial.printf("[wifi] gave up after %lu s - %s\n",
+                      (unsigned long)((millis() - t0) / 1000),
+                      wifiReasonStr(wifiLastDisconnectReason));
         screen_setup::showWifiFailed(wifiSsid.c_str());
         lvgl_port::loop();
         return false;
@@ -1384,14 +1397,132 @@ static void staNoSleep() { WiFi.setSleep(false); }
 //
 // The scan and sort methods also go into the driver's configuration, so its
 // own automatic reconnects after a drop choose the same way.
+//
+// A wrong password and a weak signal both surface as WL_CONNECT_FAILED /
+// WL_DISCONNECTED to WiFi.status() - nothing there says which. The disconnect
+// event does: reason 2/15/204 means the credentials themselves were refused,
+// and no amount of retrying fixes that. Everything else (AP not found, beacon
+// timeout, ...) is a radio-side problem that a retry can genuinely resolve.
+static bool wifiReasonIsAuthFailure(uint8_t reason) {
+    return reason == WIFI_REASON_AUTH_EXPIRE
+        || reason == WIFI_REASON_AUTH_FAIL
+        || reason == WIFI_REASON_HANDSHAKE_TIMEOUT;
+}
+
+static const char* wifiReasonStr(uint8_t reason) {
+    switch (reason) {
+        case WIFI_REASON_AUTH_EXPIRE:       return "auth expired";
+        case WIFI_REASON_AUTH_FAIL:         return "wrong password";
+        case WIFI_REASON_HANDSHAKE_TIMEOUT: return "handshake timeout (wrong password)";
+        case WIFI_REASON_NO_AP_FOUND:       return "AP not found";
+        case WIFI_REASON_BEACON_TIMEOUT:    return "beacon timeout (weak signal)";
+        case WIFI_REASON_ASSOC_FAIL:        return "association refused";
+        case WIFI_REASON_ASSOC_LEAVE:       return "disconnected by us";
+        case 0:                             return "not yet known";
+        default:                            return "other";
+    }
+}
+
+static void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+    if (event != ARDUINO_EVENT_WIFI_STA_DISCONNECTED) return;
+    wifiLastDisconnectReason = info.wifi_sta_disconnected.reason;
+    Serial.printf("[wifi] disconnected: %s (reason %d)\n",
+                  wifiReasonStr(wifiLastDisconnectReason), wifiLastDisconnectReason);
+}
+
+// ETSI, not a guess: matches the region the device ships to, and caps output
+// at 78 (19.5 dBm) rather than the chip's 802.11b ceiling of 21 dBm - the
+// same number WiFi.setTxPower() below asks for on the 802.11n path this
+// device actually runs, so the two settings agree instead of one silently
+// overriding the other.
+static const wifi_country_t WIFI_COUNTRY_ETSI = {
+    .cc = "FR", .schan = 1, .nchan = 13, .max_tx_power = 78,
+    .policy = WIFI_COUNTRY_POLICY_MANUAL,
+};
+
 static void staBegin() {
+    static bool eventHandlerAdded = false;
+    if (!eventHandlerAdded) { WiFi.onEvent(onWifiEvent); eventHandlerAdded = true; }
+    wifiLastDisconnectReason = 0;  // this attempt has not failed yet
     WiFi.disconnect(true, true);   // drop the association, erase the cached AP
     delay(50);
     WiFi.mode(WIFI_STA);
+    esp_wifi_set_country(&WIFI_COUNTRY_ETSI);
+    // 40 MHz roughly doubles the raw bit rate this device never uses - a tag
+    // scan and an MQTT ping do not need it - and the datasheet prices that
+    // width at 9-11 dB of RX sensitivity, MCS-for-MCS (Table 6-4: HT20 MCS7
+    // -82.4 dBm against HT40 MCS7 -71.4 dBm), plus worse adjacent-channel
+    // rejection (Table 6-6: 20 dB against 16 dB). On a link that is already
+    // marginal, that is the antenna-orientation swing measured on the bench,
+    // spent on throughput nothing here asks for.
+    esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
     WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
     WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+    // 19.5 dBm is not an arbitrary maximum: it is the chip's own rated
+    // ceiling for 802.11n (datasheet Table 6-2), which is the mode this
+    // device negotiates. Measured on the bench to move RX by nothing - RSSI
+    // is what this device hears, and TX power only changes what the AP
+    // hears - but it is free, so it stays on for the AP's side of the link.
+    WiFi.setTxPower(WIFI_POWER_19_5dBm);
     WiFi.begin(wifiSsid.c_str(), wifiPass.c_str());
     staNoSleep();
+}
+
+// Proactive roaming -----------------------------------------------------------
+//
+// staBegin() picks the best AP once, at the moment it runs. That covers a
+// cold boot and a genuine drop, but not the case that motivated it in the
+// first place: still associated, never dropped, just to the wrong radio.
+// A stationary device parked at the edge of one AP's cell and in easy reach
+// of a much stronger one can sit there indefinitely, because nothing asks
+// "is there something better" while the link is technically fine.
+//
+// So, every ROAM_CHECK_MS while connected: a background scan, and if some
+// other AP on the same SSID beats the current one by more than
+// ROAM_HYSTERESIS_DB, reassociate through staBegin(). The hysteresis exists
+// so two APs a couple of dB apart do not fight over a device sitting at the
+// midpoint between them.
+static const uint32_t ROAM_CHECK_MS      = 60000;
+static const int8_t   ROAM_HYSTERESIS_DB = 8;
+
+static void roamCheck() {
+    static uint32_t lastCheck   = 0;
+    static bool     scanPending = false;
+
+    if (!WiFi.isConnected()) { scanPending = false; return; }
+
+    if (!scanPending) {
+        const uint32_t now = millis();
+        if (now - lastCheck < ROAM_CHECK_MS) return;
+        lastCheck = now;
+        WiFi.scanDelete();
+        // Async and hidden-included, the same call the setup portal uses for
+        // its own background scan - it shares the radio with the active
+        // connection rather than tearing it down.
+        if (WiFi.scanNetworks(true, true) != WIFI_SCAN_FAILED) scanPending = true;
+        return;
+    }
+
+    const int n = WiFi.scanComplete();
+    if (n == WIFI_SCAN_RUNNING) return;    // not back yet - try again next pass
+    scanPending = false;
+    if (n <= 0) { WiFi.scanDelete(); return; }
+
+    const String curBssid  = WiFi.BSSIDstr();
+    const int    curRssi   = WiFi.RSSI();
+    String       bestBssid = curBssid;
+    int          bestRssi  = curRssi;
+    for (int i = 0; i < n; i++) {
+        if (WiFi.SSID(i) != wifiSsid) continue;
+        if (WiFi.RSSI(i) > bestRssi) { bestRssi = WiFi.RSSI(i); bestBssid = WiFi.BSSIDstr(i); }
+    }
+    WiFi.scanDelete();
+
+    if (bestBssid != curBssid && bestRssi - curRssi >= ROAM_HYSTERESIS_DB) {
+        Serial.printf("[wifi] roaming: %s at %d dBm beats %s at %d dBm by %d dB\n",
+                      bestBssid.c_str(), bestRssi, curBssid.c_str(), curRssi, bestRssi - curRssi);
+        staBegin();
+    }
 }
 
 
@@ -1504,12 +1635,13 @@ void loop() {
             if (!downSince) downSince = now ? now : 1;
             else if (now - downSince > 15000 && now - lastRetry > 30000) {
                 lastRetry = now;
-                Serial.printf("[wifi] down for %lus - associating to '%s' again\n",
+                Serial.printf("[wifi] down for %lus - associating to '%s' again (%s)\n",
                               (unsigned long)((now - downSince) / 1000),
-                              wifiSsid.c_str());
+                              wifiSsid.c_str(), wifiReasonStr(wifiLastDisconnectReason));
                 staBegin();
             }
         }
+        roamCheck();
     }
 
     // The backlight is the only thing that sleeps. Everything below this line
