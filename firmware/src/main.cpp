@@ -74,7 +74,7 @@ static volatile uint8_t wifiLastDisconnectReason = 0;
 PrinterCfg printers[MAX_PRINTERS];
 int     selectedPrinter = 0;
 // Send was pressed on the review screen and is waiting, briefly, for the
-// TigerTag+ product answer - see ST_REVIEW.
+// TigerTag+ product answer - see ST_SENDING.
 static bool sendWaiting = false;
 
 PrinterBackend* backend = nullptr;
@@ -113,7 +113,7 @@ static bool wifiReasonIsAuthFailure(uint8_t reason);   // likewise
 static const char* wifiReasonStr(uint8_t reason);      // likewise
 
 enum State { ST_LANG, ST_WIFI, ST_AP, ST_ACCOUNT, ST_MAIN, ST_READ, ST_SETTINGS, ST_PICK, ST_SET_WIFI, ST_SET_ACCOUNT, ST_SET_SCREEN,
-             ST_SET_UPDATE, ST_SET_RESTART, ST_SET_FACTORY, ST_PRINTER, ST_GRID, ST_SCAN, ST_REVIEW, ST_RESULT,
+             ST_SET_UPDATE, ST_SET_RESTART, ST_SET_FACTORY, ST_PRINTER, ST_GRID, ST_SCAN, ST_SENDING, ST_RESULT,
              ST_WEB_PAIR, ST_UPDATE_NOTICE, ST_SET_READER, ST_SET_BATTERY, ST_SYNCING, ST_CLOUD_SLOT, ST_CHOOSE_PRINTERS, ST_SET_READER_HEX };
 State   state = ST_LANG;
 // Which screen the gear was pressed on. Settings is reachable from both faces
@@ -1526,7 +1526,7 @@ static void roamCheck() {
     // Nor while the screen is showing a spool being reviewed or sent: the
     // states around a write are short, and waiting one more minute costs
     // nothing next to writing to a printer that has just gone away.
-    if (state == ST_SCAN || state == ST_REVIEW || state == ST_RESULT) return;
+    if (state == ST_SCAN || state == ST_SENDING || state == ST_RESULT) return;
 
     if (!scanPending) {
         const uint32_t now = millis();
@@ -2752,8 +2752,11 @@ void loop() {
                     const PrinterCfg& to = printers[selectedPrinter];
                     if (to.type == PT_CREALITY || (to.type == PT_BAMBU && !to.cloud))
                         product_api::request(tag);
-                    sendWaiting = false;
-                    state = ST_REVIEW; stateSince = millis();
+                    // Straight into the send. The slot was chosen and the spool
+                    // was presented; asking a third time to approve what the
+                    // user is visibly doing only stands in the way.
+                    sendWaiting = true;
+                    state = ST_SENDING; stateSince = millis();
                 }
                 else resultMsg = reader::lastError();
             }
@@ -2761,25 +2764,25 @@ void loop() {
         break;
     }
 
-    case ST_REVIEW: {
-        screen_scan::showReview(backend ? backend->slotLabel(selSlot) : "?", tag);
+    case ST_SENDING: {
+        // The same screen the user is already looking at, unchanged: the
+        // write is short, and a screen that appears and vanishes inside a
+        // second reads as a fault rather than as progress.
+        screen_scan::showScan(backend ? backend->slotLabel(selSlot) : "?", nullptr, true);
         lvgl_port::loop();
 
+        // The chevron still works, and it is the only way out: it cancels
+        // while the product answer is still being waited for. Once the write
+        // itself starts it runs to its end - it is a single blocking call.
         if (screen_scan::takeCancel()) {
             sendWaiting = false;
             selSlot = -1; screen_slots::invalidate();
             state = ST_GRID; break;
         }
-        // Send waits for the product endpoint only while its fetch for THIS
-        // spool is still inside its budget, and the screen keeps drawing
+        // The send waits for the product endpoint only while its fetch for
+        // THIS spool is still inside its budget, and the screen keeps drawing
         // meanwhile. Past the budget the send goes ahead without it - once:
         // an answer that turns up later is kept for next time, never sent.
-        if (screen_scan::takeSend() && !sendWaiting) {
-            sendWaiting = true;
-            if (product_api::waiting(tag.idProduct))
-                Serial.printf("[product] %lu: Send is waiting for the answer\n",
-                              (unsigned long)tag.idProduct);
-        }
         if (sendWaiting && !product_api::waiting(tag.idProduct)) {
             sendWaiting = false;
             sendOk = backend && backend->connected() && backend->assign(selSlot, tag);
@@ -2799,19 +2802,20 @@ void loop() {
     }
 
     case ST_RESULT: {
-        uint32_t landed = 0xFFFFFFFFu;
-        if (sendOk && backend) {
-            const SlotState& st = backend->slot(selSlot);
-            if (st.known) landed = ((uint32_t)st.r << 16) | ((uint32_t)st.g << 8) | st.b;
-        }
+        // Five seconds, counted down on screen, and a tap anywhere ends it
+        // sooner. A success now carries an instruction - which slot to put the
+        // spool in - so it has to stay long enough to be read, and it has to
+        // say that it is going away.
+        const uint32_t RESULT_MS = 5000;
+        const uint32_t since = millis() - stateSince;
         screen_scan::showResult(backend ? backend->slotLabel(selSlot) : "?",
-                                sendOk, resultMsg.c_str(), tag, landed);
+                                sendOk, resultMsg.c_str(), tag,
+                                since >= RESULT_MS ? 0 : RESULT_MS - since);
         lvgl_port::loop();
 
-        // A success may clear itself; a failure waits to be read. Four seconds
-        // is plenty to see a tick and nowhere near enough to take in what went
-        // wrong and what to do about it.
-        if (screen_scan::takeDismiss() || (sendOk && millis() - stateSince > 4000)) {
+        // A failure still waits to be read: there is no countdown on it,
+        // because taking in what went wrong takes longer than five seconds.
+        if (screen_scan::takeDismiss() || (sendOk && since > RESULT_MS)) {
             selSlot = -1; screen_slots::invalidate();
             state = ST_GRID;
         }

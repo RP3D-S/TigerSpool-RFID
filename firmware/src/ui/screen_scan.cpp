@@ -8,12 +8,11 @@
 #include <stdio.h>
 
 namespace {
-volatile bool s_cancel = false, s_send = false, s_dismiss = false;
+volatile bool s_cancel = false, s_dismiss = false;
 enum Which { NONE, SCAN, REVIEW, RESULT } s_which = NONE;
 uint32_t s_sig = 0;
 
 void onCancel()  { s_cancel = true; }
-void onSend()    { s_send = true; }
 void onDismiss() { s_dismiss = true; }
 
 uint32_t hashStr(const char* s, uint32_t h = 2166136261u) {
@@ -44,15 +43,35 @@ void invalidate() { s_which = NONE; s_sig = 0; }
 // proof: the slot grid is only reachable through a printer that answered, and
 // the tap that opened this screen came off that grid. A pair of green dots
 // repeating it spends the top of the panel saying what the user just did.
-void showScan(const char* slotLabel, const char* errorOrNull) {
-    lvgl_port::Lock lvglGuard;   // LVGL is not reentrant - see lvgl_port.h
-    uint32_t sig = hashStr(slotLabel) ^ hashStr(errorOrNull ? errorOrNull : "");
-    if (s_which == SCAN && sig == s_sig) return;
-    s_which = SCAN; s_sig = sig;
+// The Cancel button of the scan screen, kept so its state can change without
+// the screen being rebuilt around it.
+static lv_obj_t* s_scanCancel = nullptr;
 
-    char title[24];
-    snprintf(title, sizeof(title), "%s %s", i18n::T(S_SLOT), slotLabel);
-    lv_obj_t* body = frame::build(title, onCancel);
+// Invisible and unpressable, or back to normal. Not hidden and not deleted -
+// LVGL's flex layout skips a hidden child, and the column would re-centre.
+static void setCancelVisible(bool on) {
+    if (!s_scanCancel) return;
+    lv_obj_set_style_opa(s_scanCancel, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    if (on) lv_obj_add_flag(s_scanCancel, LV_OBJ_FLAG_CLICKABLE);
+    else    lv_obj_clear_flag(s_scanCancel, LV_OBJ_FLAG_CLICKABLE);
+}
+
+void showScan(const char* slotLabel, const char* errorOrNull, bool caught) {
+    lvgl_port::Lock lvglGuard;   // LVGL is not reentrant - see lvgl_port.h
+    // `caught` is NOT in the signature. It only decides whether one button is
+    // drawn, and rebuilding the screen for it restarts the spinner from zero -
+    // the animation jumps at the exact moment the chip is read, which reads as
+    // the device having lost its place.
+    uint32_t sig = hashStr(slotLabel) ^ hashStr(errorOrNull ? errorOrNull : "");
+    if (s_which == SCAN && sig == s_sig) { setCancelVisible(!caught); return; }
+    s_which = SCAN; s_sig = sig;
+    s_scanCancel = nullptr;
+
+    // The slot's name alone, exactly as the receipt at the end of the flow
+    // titles itself. Those two screens are the same moment seen twice - before
+    // and after - and a header that says "Slot B2" on one and "B2" on the
+    // other reads as having moved somewhere else in between.
+    lv_obj_t* body = frame::build(slotLabel, onCancel);
 
     lv_obj_t* sp = lv_spinner_create(body, 1400, 55);
     lv_obj_set_size(sp, 104, 104);
@@ -70,103 +89,221 @@ void showScan(const char* slotLabel, const char* errorOrNull) {
     // Tone 0, not the destructive red. Cancelling a scan throws nothing away -
     // it wore the same colour as Sign out and Factory reset, which teaches
     // people to hesitate over the one button on this screen that is harmless.
-    frame::button(body, i18n::T(S_CANCEL), 0, onCancel);
+    //
+    // It goes once the chip has been caught. This screen stands through the
+    // write itself - sending is over before a screen of its own could be read -
+    // but from the instant the spool is taken there is nothing left to call
+    // off, and a button that would do nothing is worse than no button.
+    //
+    // Made INVISIBLE, not removed: LVGL's flex layout skips a hidden child, so
+    // deleting it or hiding it re-centres the column and walks the spinner and
+    // the words down the screen at the exact moment the user is watching them.
+    // The button keeps its place and stops being drawn or pressed.
+    s_scanCancel = frame::button(body, i18n::T(S_CANCEL), 0, onCancel);
+    setCancelVisible(!caught);
 }
 
-void showReview(const char* slotLabel, const TagInfo& tag) {
-    lvgl_port::Lock lvglGuard;   // LVGL is not reentrant - see lvgl_port.h
-    uint32_t sig = hashStr(slotLabel) ^ (tag.r << 16 | tag.g << 8 | tag.b)
-                 ^ hashStr(tag.material.c_str()) ^ hashStr(tag.brand.c_str());
-    if (s_which == REVIEW && sig == s_sig) return;
-    s_which = REVIEW; s_sig = sig;
-
-    // No glyph in front of the slot name. A right chevron sat beside the back
-    // chevron in the same bar, pointing the other way, and read as a stray
-    // character rather than as a direction.
-    char title[28];
-    snprintf(title, sizeof(title), "%s", slotLabel);
-    lv_obj_t* body = frame::build(title, onCancel);
-    lv_obj_set_style_pad_row(body, 4, 0);
-
-    swatch(body, tag.r, tag.g, tag.b, 68);
-    frame::bigLabel(tag.material.c_str(), theme::TEXT);
-    frame::caption(tag.brand.c_str(), theme::ACCENT, &font_ui_14);
-
-    char line[40];
-    snprintf(line, sizeof(line), "%s  %u-%u C", i18n::T(S_NOZZLE), tag.nozMin, tag.nozMax);
-    frame::caption(line, theme::TEXT_DIM);
-    snprintf(line, sizeof(line), "%s  %u-%u C", i18n::T(S_BED), tag.bedMin, tag.bedMax);
-    frame::caption(line, theme::TEXT_DIM);
-
-    lv_obj_t* actions = lv_obj_create(body);
-    lv_obj_remove_style_all(actions);
-    lv_obj_set_width(actions, LV_PCT(100));
-    lv_obj_set_height(actions, theme::BUTTON_H);
-    lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(actions, theme::GAP, 0);
-    lv_obj_clear_flag(actions, LV_OBJ_FLAG_SCROLLABLE);
-    // frame::button() is full-width by design, because almost every button in
-    // this UI is stacked. Two of them in a flex ROW means the first takes the
-    // whole row and the second is laid out past the edge - and this container
-    // does not scroll, so it simply is not there. flex_grow makes them share.
-    lv_obj_set_flex_grow(frame::button(actions, i18n::T(S_NO), 2, onCancel), 1);
-    lv_obj_set_flex_grow(frame::button(actions, i18n::T(S_SEND), 1, onSend), 1);
-}
+// How long the success screen stays up on its own, and the bar that shows it
+// draining. The countdown is visible because an screen that vanishes without
+// warning, while somebody is reading where to put the spool, is a screen that
+// took the instruction away mid-sentence.
+static const uint32_t RESULT_MS = 5000;
+static lv_obj_t* s_timerFill = nullptr;   // width driven by msLeft, not rebuilt
 
 void showResult(const char* slotLabel, bool ok, const char* message,
-                const TagInfo& tag, uint32_t sentColour) {
+                const TagInfo& tag, uint32_t msLeft) {
     lvgl_port::Lock lvglGuard;   // LVGL is not reentrant - see lvgl_port.h
-    uint32_t sig = hashStr(message) ^ (uint32_t)ok ^ sentColour;
-    if (s_which == RESULT && sig == s_sig) return;
+    // msLeft is NOT in the signature: it changes on every pass, and rebuilding
+    // this screen sixty times a second is how a device stops answering taps.
+    uint32_t sig = hashStr(message) ^ (uint32_t)ok ^ hashStr(slotLabel)
+                 ^ hashStr(tag.material.c_str());
+    if (s_which == RESULT && sig == s_sig) {
+        if (s_timerFill) {
+            const lv_coord_t full = theme::SCREEN_W - 2 * theme::PAD;
+            lv_coord_t w = (lv_coord_t)((uint32_t)full * msLeft / RESULT_MS);
+            lv_obj_set_width(s_timerFill, w < 0 ? 0 : w);
+        }
+        return;
+    }
     s_which = RESULT; s_sig = sig;
+    s_timerFill = nullptr;
 
     lv_obj_t* body = frame::build(slotLabel, onDismiss);
+    lv_obj_set_style_pad_row(body, 6, 0);
 
-    lv_obj_t* icon = lv_label_create(body);
-    lv_label_set_text(icon, ok ? LV_SYMBOL_OK : LV_SYMBOL_CLOSE);
-    lv_obj_set_style_text_font(icon, &font_ui_24, 0);
-    lv_obj_set_style_text_color(icon, lv_color_hex(ok ? theme::OK : theme::DANGER), 0);
+    // A tap ANYWHERE takes the countdown to zero and closes, not only the
+    // chevron. The screen is a receipt with one instruction on it; asking
+    // someone to find a target on it is asking them to solve a puzzle to
+    // dismiss a message.
+    //
+    // The handler goes on the screen AND the containers above it, because an
+    // LVGL container is clickable from birth and a click does not bubble: the
+    // body covers everything under the header, so a handler on the screen
+    // alone would only ever fire on the few pixels the body does not reach.
+    auto dismissCb = [](lv_event_t*) { s_dismiss = true; };
+    lv_obj_add_flag(frame::screen(), LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(frame::screen(), dismissCb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_flag(body, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(body, dismissCb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_flag(frame::header(), LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(frame::header(), dismissCb, LV_EVENT_CLICKED, nullptr);
 
-    frame::bigLabel(message, theme::TEXT);
 
-    const bool adapted = ok && sentColour != 0xFFFFFFFFu &&
-        sentColour != ((uint32_t)tag.r << 16 | (uint32_t)tag.g << 8 | tag.b);
-    if (adapted) {
-        // Two swatches and one sentence. The printer did what it could; the
-        // screen owes the user the difference rather than a silent "OK".
-        lv_obj_t* pair = lv_obj_create(body);
-        lv_obj_remove_style_all(pair);
-        lv_obj_set_width(pair, LV_PCT(100));
-        lv_obj_set_height(pair, 32);
-        lv_obj_set_flex_flow(pair, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(pair, LV_FLEX_ALIGN_CENTER,
-                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(pair, 8, 0);
-        lv_obj_clear_flag(pair, LV_OBJ_FLAG_SCROLLABLE);
-
-        swatch(pair, tag.r, tag.g, tag.b, 26);
-        lv_obj_t* arrow = lv_label_create(pair);
-        lv_label_set_text(arrow, LV_SYMBOL_RIGHT);
-        lv_obj_set_style_text_color(arrow, lv_color_hex(theme::TEXT_DIM), 0);
-        swatch(pair, (sentColour >> 16) & 0xFF, (sentColour >> 8) & 0xFF,
-               sentColour & 0xFF, 26);
-
-        frame::caption(i18n::T(S_COLOUR_ADAPTED), theme::ACCENT);
-    } else if (ok) {
-        char t[48];
-        snprintf(t, sizeof(t), "%s  %s", tag.material.c_str(), tag.brand.c_str());
-        frame::caption(t, theme::TEXT_DIM);
+    if (!ok) {
+        // A failure keeps the plain shape: what went wrong, and that the screen
+        // waits. There is no next step to give - the spool did not go anywhere.
+        lv_obj_t* icon = lv_label_create(body);
+        lv_label_set_text(icon, LV_SYMBOL_CLOSE);
+        lv_obj_set_style_text_font(icon, &font_ui_24, 0);
+        lv_obj_set_style_text_color(icon, lv_color_hex(theme::DANGER), 0);
+        frame::bigLabel(message, theme::TEXT);
+        // And it means it: the caption says "tap to continue", and until this
+        // handler was installed for the failure too, only the chevron answered.
+        frame::caption(i18n::T(S_TAP_BACK), theme::TEXT_DIM);
+        return;
     }
 
-    // Only when the screen is going to wait. A success clears itself after four
-    // seconds, so telling someone to touch it is an instruction that expires
-    // under their finger; a failure stays until it is acknowledged, and then
-    // the line is the truth. The two behaviours now agree with what is written.
-    if (!ok) frame::caption(i18n::T(S_TAP_BACK), theme::TEXT_DIM);
+    lv_obj_t* ring = lv_obj_create(body);
+    lv_obj_remove_style_all(ring);
+    lv_obj_set_size(ring, 52, 52);
+    lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(ring, lv_color_hex(theme::OK), 0);
+    lv_obj_set_style_bg_opa(ring, 40, 0);
+    lv_obj_clear_flag(ring, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(ring, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t* tick = lv_label_create(ring);
+    lv_label_set_text(tick, LV_SYMBOL_OK);
+    lv_obj_set_style_text_font(tick, &font_ui_24, 0);
+    lv_obj_set_style_text_color(tick, lv_color_hex(theme::OK), 0);
+    lv_obj_center(tick);
+
+    lv_obj_t* title = lv_label_create(body);
+    lv_label_set_text(title, i18n::T(S_SENT_TO_PRINTER));
+    lv_label_set_long_mode(title, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(title, theme::SCREEN_W - 2 * theme::PAD);
+    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(title, &font_ui_bold_16, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(theme::TEXT), 0);
+
+    // What was sent, and nothing about what the slot held before: the question
+    // this screen answers is "did my spool go through", not "what changed".
+    lv_obj_t* card = lv_obj_create(body);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_width(card, LV_PCT(100));
+    lv_obj_set_height(card, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(card, 9, 0);
+    lv_obj_set_style_pad_column(card, 10, 0);
+    lv_obj_set_style_radius(card, theme::RADIUS, 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_border_color(card, lv_color_hex(theme::LINE), 0);
+    lv_obj_set_style_border_opa(card, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    swatch(card, tag.r, tag.g, tag.b, 28);
+
+    lv_obj_t* col = lv_obj_create(card);
+    lv_obj_remove_style_all(col);
+    lv_obj_set_height(col, LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(col, 1);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(col, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t* mat = lv_label_create(col);
+    lv_label_set_text(mat, tag.material.length() ? tag.material.c_str() : "?");
+    lv_label_set_long_mode(mat, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(mat, LV_PCT(100));
+    lv_obj_set_style_text_font(mat, &font_ui_bold_16, 0);
+    lv_obj_set_style_text_color(mat, lv_color_hex(theme::TEXT), 0);
+
+    String sub = tag.brand;
+    if (tag.diameterLabel.length() && tag.diameterLabel != "-") {
+        if (sub.length()) sub += " \xC2\xB7 ";
+        sub += tag.diameterLabel;
+    }
+    lv_obj_t* who = lv_label_create(col);
+    lv_label_set_text(who, sub.c_str());
+    lv_label_set_long_mode(who, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(who, LV_PCT(100));
+    lv_obj_set_style_text_font(who, &font_ui_12, 0);
+    lv_obj_set_style_text_color(who, lv_color_hex(theme::TEXT_DIM), 0);
+
+    // Pushes the instruction to the bottom of the screen, where the thumb is.
+    lv_obj_t* spacer = lv_obj_create(body);
+    lv_obj_remove_style_all(spacer);
+    lv_obj_set_width(spacer, 1);
+    lv_obj_set_flex_grow(spacer, 1);
+    lv_obj_clear_flag(spacer, LV_OBJ_FLAG_CLICKABLE);
+
+    // ALWAYS two lines and always the same height, whatever the slot is called.
+    // A block that grows a line when a printer names its slots "AMS2-4" and
+    // shrinks again on "1" makes the screen jump between two spools, and the
+    // eye reads that as two different screens.
+    lv_obj_t* band = lv_obj_create(body);
+    lv_obj_remove_style_all(band);
+    lv_obj_set_width(band, LV_PCT(100));
+    lv_obj_set_height(band, 68);
+    lv_obj_set_style_radius(band, theme::RADIUS, 0);
+    lv_obj_set_style_bg_color(band, lv_color_hex(theme::GO_BG), 0);
+    lv_obj_set_style_bg_opa(band, LV_OPA_COVER, 0);
+    lv_obj_set_flex_flow(band, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(band, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(band, 6, 0);
+    lv_obj_clear_flag(band, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(band, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t* l1 = lv_label_create(band);
+    lv_label_set_text(l1, i18n::T(S_INSERT_IN));
+    lv_label_set_long_mode(l1, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(l1, LV_PCT(100));
+    lv_obj_set_style_text_align(l1, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(l1, &font_ui_14, 0);
+    lv_obj_set_style_text_color(l1, lv_color_hex(theme::TEXT), 0);
+
+    // The slot name on the second line, on its own: it is the one word the
+    // user has to carry to the machine.
+    lv_obj_t* l2 = lv_label_create(band);
+    lv_label_set_text(l2, slotLabel);
+    lv_label_set_long_mode(l2, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(l2, LV_PCT(100));
+    lv_obj_set_style_text_align(l2, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(l2, &font_ui_20, 0);
+    lv_obj_set_style_text_color(l2, lv_color_hex(theme::TEXT), 0);
+
+    // The timer, as a bar that drains. Four pixels: it says "this is going to
+    // close" without competing with the instruction above it.
+    lv_obj_t* track = lv_obj_create(body);
+    lv_obj_remove_style_all(track);
+    lv_obj_set_size(track, LV_PCT(100), 4);
+    lv_obj_set_style_radius(track, 2, 0);
+    lv_obj_set_style_bg_color(track, lv_color_hex(0x1E2530), 0);
+    lv_obj_set_style_bg_opa(track, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(track, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(track, LV_OBJ_FLAG_CLICKABLE);
+
+    // Built at the width the caller asks for, not at full: the screen can be
+    // rebuilt mid-countdown - a language change, a redraw after a preview - and
+    // a bar that jumps back to full is a timer that lies.
+    const lv_coord_t fullW = theme::SCREEN_W - 2 * theme::PAD;
+    lv_coord_t startW = (lv_coord_t)((uint32_t)fullW * (msLeft > RESULT_MS ? RESULT_MS : msLeft)
+                                     / RESULT_MS);
+    s_timerFill = lv_obj_create(track);
+    lv_obj_remove_style_all(s_timerFill);
+    lv_obj_set_size(s_timerFill, startW, 4);
+    lv_obj_set_style_radius(s_timerFill, 2, 0);
+    lv_obj_set_style_bg_color(s_timerFill, lv_color_hex(theme::OK), 0);
+    lv_obj_set_style_bg_opa(s_timerFill, LV_OPA_COVER, 0);
+    lv_obj_align(s_timerFill, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_clear_flag(s_timerFill, LV_OBJ_FLAG_CLICKABLE);
+
+    frame::caption(i18n::T(S_TAP_BACK), theme::TEXT_DIM);
 }
 
 bool takeCancel()  { bool v = s_cancel;  s_cancel = false;  return v; }
-bool takeSend()    { bool v = s_send;    s_send = false;    return v; }
 bool takeDismiss() { bool v = s_dismiss; s_dismiss = false; return v; }
 
 }  // namespace screen_scan

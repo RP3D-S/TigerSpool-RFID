@@ -17,12 +17,9 @@ struct Row { const char* s[LANG_N]; };
 
 static const Row STR[S_COUNT] = {
 /* S_TOUCH_SLOT     */ {{ "tap a slot", "touchez un emplacement", "Slot antippen", "toca una ranura", "tocca uno slot", "dotknij gniazda", "toque um slot", "toque num slot", "点击槽位" }},
-/* S_SLOT           */ {{ "Slot", "Empl.", "Slot", "Ranura", "Slot", "Gniazdo", "Slot", "Slot", "槽位" }},
 /* S_BRING_TAG      */ {{ "Hold the spool", "Approchez la bobine", "Spule anhalten", "Acerca la bobina", "Avvicina la bobina", "Przyloz szpule", "Aproxime a bobina", "Aproxime a bobine", "将料盘" }},
 /* S_TO_READER      */ {{ "against the box", "contre le boîtier", "an das Gerat", "a la caja", "alla scatola", "do urzadzenia", "da caixa", "da caixa", "靠近设备" }},
 /* S_CANCEL         */ {{ "Cancel", "Annuler", "Abbrechen", "Cancelar", "Annulla", "Anuluj", "Cancelar", "Cancelar", "取消" }},
-/* S_NO             */ {{ "No", "Non", "Nein", "No", "No", "Nie", "Nao", "Nao", "否" }},
-/* S_SEND           */ {{ "Send", "Envoyer", "Senden", "Enviar", "Invia", "Wyslij", "Enviar", "Enviar", "发送" }},
 /* S_SEND_TO        */ {{ "Send to %s?", "Envoyer vers %s ?", "An %s senden?", "Enviar a %s?", "Inviare a %s?", "Wyslac do %s?", "Enviar para %s?", "Enviar para %s?", "发送到 %s?" }},
 /* S_NOZZLE         */ {{ "Nozzle", "Buse", "Duse", "Boquilla", "Ugello", "Dysza", "Bico", "Bico", "喷嘴" }},
 /* S_BED            */ {{ "Bed", "Plateau", "Bett", "Cama", "Piano", "Stol", "Mesa", "Cama", "热床" }},
@@ -125,6 +122,9 @@ static const Row STR[S_COUNT] = {
 /* S_READ_HINT      */ {{ "Read a spool", "Lire une bobine", "Spule lesen", "Leer una bobina", "Leggi una bobina", "Odczytaj szpule", "Ler uma bobina", "Ler uma bobine", "读取线盘" }},
 /* S_READ_PUT_SPOOL */ {{ "Put a spool", "Posez une bobine", "Spule auflegen", "Coloca una bobina", "Appoggia una bobina", "Poloz szpule", "Coloque uma bobina", "Coloque uma bobine", "请放置线盘" }},
 /* S_READ_ON_READER */ {{ "on the reader", "sur le lecteur", "auf den Leser", "en el lector", "sul lettore", "na czytniku", "no leitor", "no leitor", "在读取器上" }},
+/* S_DRYING         */ {{ "Drying", "Séchage", "Trocknung", "Secado", "Essiccazione", "Suszenie", "Secagem", "Secagem", "烘干" }},
+/* S_SENT_TO_PRINTER*/ {{ "Sent to the printer", "Envoyé à l'imprimante", "An den Drucker gesendet", "Enviado a la impresora", "Inviato alla stampante", "Wyslano do drukarki", "Enviado para a impressora", "Enviado para a impressora", "已发送到打印机" }},
+/* S_INSERT_IN      */ {{ "Insert the spool in", "Insérez la bobine dans", "Spule einlegen in", "Inserta la bobina en", "Inserisci la bobina in", "Wloz szpule do", "Insira a bobina em", "Insira a bobine em", "请将线盘装入" }},
 /* S_WRITE_MODE     */ {{ "Write", "Écriture", "Schreiben", "Escritura", "Scrittura", "Zapis", "Escrita", "Escrita", "写入" }},
 /* S_SOON           */ {{ "Coming soon", "Bientôt disponible", "Demnächst", "Próximamente", "Prossimamente", "Wkrotce", "Em breve", "Em breve", "即将推出" }},
 /* S_REMAINING      */ {{ "Remaining", "Restant", "Rest", "Restante", "Rimanente", "Pozostalo", "Restante", "Restante", "剩余" }},

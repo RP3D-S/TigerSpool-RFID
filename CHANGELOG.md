@@ -7,6 +7,33 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.62.0] - 2026-09-20
+
+### Changed
+
+- **The spool goes to the printer as soon as it is read.** The confirm step
+  with its Send / No buttons is gone: choosing the slot and presenting the
+  spool were the decision, and being asked a third time only stood between the
+  user and the machine. Nothing new appears for the write itself either - the
+  screen that asked for the spool stays exactly as it is, minus the Cancel
+  button, which has nothing left to call off once the chip is caught. The
+  write is over before a screen of its own could be read, and one that flashes
+  past reads as a fault rather than as progress.
+- The three screens of one send now share a title: the slot's name, alone.
+  "Slot B2" on one and "B2" on the next read as two different places.
+- **The screen after a send was rewritten.** One success screen instead of two:
+  it confirms what was sent to the printer - the spool's colour, material,
+  brand and diameter - and then names the next step in a green block, with the
+  slot on its own line. It no longer shows what the slot held before, nor the
+  colour the printer settled on. It stays five seconds, counted down by a bar
+  that drains, and a tap anywhere ends it sooner.
+
+### Added
+
+- Reader mode shows the **drying** instruction the chip carries - temperature
+  and hours on one line. The disc above it lost 8 px to make room, which is
+  what a 320 px screen costs.
+
 ## [1.61.0] - 2026-09-19
 
 ### Added

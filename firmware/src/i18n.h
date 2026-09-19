@@ -28,12 +28,9 @@ enum Lang : uint8_t {
 
 enum StrId : uint8_t {
     S_TOUCH_SLOT = 0,
-    S_SLOT,
     S_BRING_TAG,
     S_TO_READER,
     S_CANCEL,
-    S_NO,
-    S_SEND,
     S_SEND_TO,
     S_NOZZLE,
     S_BED,
@@ -137,6 +134,9 @@ enum StrId : uint8_t {
     S_READ_HINT,
     S_READ_PUT_SPOOL,
     S_READ_ON_READER,
+    S_DRYING,
+    S_SENT_TO_PRINTER,
+    S_INSERT_IN,
     S_WRITE_MODE,
     S_SOON,
     S_REMAINING,

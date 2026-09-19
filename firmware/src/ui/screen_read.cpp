@@ -32,7 +32,7 @@ void factRow(lv_obj_t* parent, const char* key, const char* value) {
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_bottom(row, 6, 0);
+    lv_obj_set_style_pad_bottom(row, 4, 0);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t* k = lv_label_create(row);
@@ -117,9 +117,14 @@ void showTag(const TagInfo& tag) {
 
     // The colour, as the spool's own disc. It is what a person recognises
     // before reading a word of the screen.
+    //
+    // 60 px rather than the 68 it started at: with drying on the screen there
+    // are four value rows under it, and on 320 px the last of them - what is
+    // left on the spool - fell off the bottom. The disc is the one element
+    // that reads the same a little smaller.
     lv_obj_t* disc = lv_obj_create(body);
     lv_obj_remove_style_all(disc);
-    lv_obj_set_size(disc, 68, 68);
+    lv_obj_set_size(disc, 60, 60);
     lv_obj_set_style_radius(disc, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(disc, lv_color_make(tag.r, tag.g, tag.b), 0);
     lv_obj_set_style_bg_opa(disc, LV_OPA_COVER, 0);
@@ -135,7 +140,7 @@ void showTag(const TagInfo& tag) {
     lv_obj_set_style_text_align(mat, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(mat, &font_ui_20, 0);
     lv_obj_set_style_text_color(mat, lv_color_hex(theme::TEXT), 0);
-    lv_obj_set_style_pad_top(mat, 10, 0);
+    lv_obj_set_style_pad_top(mat, 6, 0);
 
     // Brand, finish and diameter on one line: three short facts that belong
     // together and that nobody reads one at a time.
@@ -155,7 +160,7 @@ void showTag(const TagInfo& tag) {
     lv_obj_set_style_text_align(who, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(who, &font_ui_14, 0);
     lv_obj_set_style_text_color(who, lv_color_hex(theme::TEXT_DIM), 0);
-    lv_obj_set_style_pad_bottom(who, 14, 0);
+    lv_obj_set_style_pad_bottom(who, 10, 0);
 
     char buf[32];
     if (tag.nozMin || tag.nozMax) {
@@ -165,6 +170,13 @@ void showTag(const TagInfo& tag) {
     if (tag.bedMin || tag.bedMax) {
         snprintf(buf, sizeof(buf), "%u - %u °C", tag.bedMin, tag.bedMax);
         factRow(body, i18n::T(S_BED), buf);
+    }
+    // How to dry it, on one line: the temperature and the hours are never read
+    // apart, and two rows for one instruction would push what is left on the
+    // spool off the bottom of a 320 px screen.
+    if (tag.dryTemp || tag.dryHours) {
+        snprintf(buf, sizeof(buf), "%u °C · %u h", tag.dryTemp, tag.dryHours);
+        factRow(body, i18n::T(S_DRYING), buf);
     }
     // What is left, which the TigerScale keeps up to date on the chip itself.
     // Shown only when a scale has written it: a spool nobody weighed reads 0,

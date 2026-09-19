@@ -18,6 +18,53 @@ message, and reset it to this header.
 
 ## Unreleased
 
+## 2026-09-20 - the send, straight through (released in 1.62.0)
+
+### Changed
+
+- ST_REVIEW is now ST_SENDING, and it has NO screen of its own. The write
+  starts by itself when the tag is read and the scan screen simply stays up,
+  with one change: `showScan(..., caught=true)` drops the Cancel button, since
+  from that instant there is nothing left to call off. Two earlier attempts
+  were thrown away first - a full screen for the send (spool, temperatures,
+  spinner), then the same screen with its words changed to "Sending" - because
+  the send is short enough that anything shown for it flashes past. Benoit:
+  "je veux pas voir l'ecran intermediaire car c'est trop rapide". `S_SENDING`
+  went with them.
+  The chevron still cancels while the product endpoint is being waited for;
+  once `assign()` starts it is one blocking call and runs to its end.
+  `S_SEND`, `S_NO` and `S_SLOT` are gone with the buttons and the old title;
+  `S_SENDING` replaces them.
+- The scan screen is titled with the slot's name alone, like the receipt.
+- `screen_scan::showResult` rebuilt. Benoit: un seul ecran de succes, confirmer
+  l'envoi et donner l'etape suivante -> in English: one success screen, confirm
+  what was sent and name the next step. Layout: tick in a green ring, "Sent to
+  the printer", the spool in a bordered card, then a fixed 68 px green block
+  carrying S_INSERT_IN with the slot label ALWAYS on its second line - it must
+  not change height between "1" and "AMS2-4", or the screen jumps between two
+  spools. The colour-adaptation pair of swatches is gone with it.
+- The success screen now runs a five-second countdown drawn as a draining bar,
+  and the whole screen is clickable so a tap anywhere dismisses it. `msLeft` is
+  deliberately OUT of the redraw signature: the bar's width is set on the early
+  return, so the screen is not rebuilt sixty times a second.
+- New strings S_SENT_TO_PRINTER and S_INSERT_IN, nine languages.
+- Previews `scan`, `review`, `result`, `resultlong` (AMS2-4, the layout's worst
+  case) and `resultfail`: these three screens had none, so nobody could look at
+  them without a printer switched on and a spool in hand.
+
+### Added
+
+- The drying row on the reader screen (`S_DRYING`, nine languages): "55 °C -
+  4 h" from `TagInfo::dryTemp` / `dryHours`. Benoit: "le séchage c'est
+  important".
+
+### Changed
+
+- Reader screen geometry tightened to hold a fourth value row on 320 px: disc
+  68 -> 60, row gap 6 -> 4, and 8 px off the two paddings above and below the
+  brand line. Verified with a real spool: PLA High Speed, drying 55 °C - 4 h,
+  matching the serial decode, with "Restant 476 g" fully on screen.
+
 ## 2026-09-19 - a home screen, and reader mode (released in 1.61.0)
 
 ### Added

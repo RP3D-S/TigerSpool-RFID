@@ -363,6 +363,7 @@ namespace {
         t.diameterLabel = "1.75 mm";
         t.nozMin = 230; t.nozMax = 260;
         t.bedMin = 70;  t.bedMax = 85;
+        t.dryTemp = 65; t.dryHours = 8;
         t.available = 742;
         t.unitLabel = "g";
         t.signature = TagInfo::SIG_VALID;
@@ -450,6 +451,15 @@ namespace {
         else if (preview == "main")      screen_home::showMain(2, 3, true, -58, 3);
         else if (preview == "read")      screen_read::showWaiting();
         else if (preview == "readtag")   { screen_read::invalidate(); screen_read::showTag(previewTag()); }
+        // The everyday loop: present the spool, confirm it, and the receipt
+        // that tells you where to put it. `resultlong` is the layout's worst
+        // case - a printer whose slots are called AMS2-4.
+        else if (preview == "scan")      screen_scan::showScan("B2", nullptr);
+        else if (preview == "sending")   screen_scan::showScan("B2", nullptr, true);
+        else if (preview == "result")    screen_scan::showResult("B2", true, "", previewTag(), 3200);
+        else if (preview == "resultlong") screen_scan::showResult("AMS2-4", true, "", previewTag(), 5000);
+        else if (preview == "resultfail") screen_scan::showResult("B2", false,
+                                             i18n::T(S_SEND_FAIL), previewTag(), 0);
         else if (preview == "greys")     previewGreys();
         else if (preview == "icons")     previewIcons();
 
