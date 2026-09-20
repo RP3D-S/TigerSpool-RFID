@@ -7,6 +7,35 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.63.0] - 2026-09-20
+
+### Fixed
+
+- **Signing in with an email and password no longer restarts the device.** One
+  route rebooted and the other did not, which is what a user reported. The
+  restart was hiding a real gap: the loop only reloaded the printer list when
+  it had asked for the sync itself, so a sync done from the web page landed in
+  NVS with nobody reading it back. It reads it back now, and nothing reboots -
+  not after an email sign-in, not after a Google one, not after a manual sync.
+
+### Changed
+
+- The Cancel button stays for the whole of the scan screen, including the write
+  that follows the read. 1.62.0 took it away the instant the chip was caught,
+  which turned out to be a flicker a fraction of a second before the screen
+  changed anyway.
+- The screen that waits for a chip no longer prints the reader's error in red
+  under its own instruction. "Hold it closer" in red, under "hold the spool
+  against the box", while somebody is doing exactly that, reads as a fault they
+  have caused. The error still goes to the serial log.
+- The reader is called **Scan** on the home screen and in its own header, and
+  its second line asks the question it answers: "What is this?".
+- In reader mode, a tap anywhere on the spool's data goes back, not only the
+  chevron: the hand that is not holding the spool should not have to find a
+  corner.
+- Reader mode marks a valid chip **Certified** rather than "genuine",
+  translated in each language.
+
 ## [1.62.0] - 2026-09-20
 
 ### Changed

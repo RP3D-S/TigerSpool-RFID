@@ -18,6 +18,47 @@ message, and reset it to this header.
 
 ## Unreleased
 
+## 2026-09-20 - the sign-in reboot, and the scan flow settled (released in 1.63.0)
+
+### Fixed
+
+- Email/password sign-in rebooted the ESP32; Google pairing did not. Reported
+  by a user. `handleTtLogin`, `handleTtSync` and the browser-driven Google poll
+  all set `restartAt`, and the reason they needed to was in main.cpp: the
+  ST_MAIN and ST_PRINTER sites tested `if (asyncTake(s)) { if
+  (consumeChanged()) ... }`, so a synchronous `syncNow()` from the web handler
+  - which hands nothing to asyncTake - never triggered `loadCfg()`. The two
+  questions are now asked separately, and the three restarts are gone with
+  `W_RESTART_SUFFIX`. `forget()` still restarts; dropping a session is the one
+  case where starting clean is the point.
+  Verified on the bench: a POST to /tt-sync runs the full account sync (12.7 s,
+  16 LAN printers) with no `rst:` in the serial log and a frame counter that
+  does not restart. The email path itself is UNVERIFIED here - signing in needs
+  someone's real credentials, which I do not handle.
+
+### Changed
+
+- `S_SIG_VALID` is "Certified" and its translations - Certifié, Zertifiziert,
+  Certificado, Certificato, Certyfikowany, 已认证 - replacing "genuine" /
+  "authentique". The English word was used in all nine first; Benoit: "il faut
+  le mettre dans la bonne langue". It is drawn in one place, the reader
+  screen's header; the NFC tester shows "OK" and is untouched.
+- `S_READ_MODE` is "Scan" (Escanear / Scansione / Skanuj / Digitalizar / 扫描)
+  and `S_READ_HINT` is "What is this?" - the row now names the action and asks
+  the question instead of describing the hardware. The home row's hint is
+  clamped to ONE line: the first French wording wrapped and pushed the row's
+  own label off centre.
+- `screen_read::showTag` puts the back handler on the screen, the body and the
+  header, and clears LV_OBJ_FLAG_CLICKABLE on the value rows and the colour
+  disc - an LVGL container is clickable from birth and swallows the click.
+- `showScan` lost its `errorOrNull` argument: a failed read is logged, not
+  drawn. Benoit: "ne met pas le texte rouge quand tu attends la puce".
+- The scan screen keeps its Cancel button for its whole life, including the
+  write. Hiding it the instant the chip was caught was tried and thrown out:
+  the write is short, so the button vanished a fraction of a second before the
+  screen changed anyway, and a flicker on the way out makes the device feel
+  unsteady.
+
 ## 2026-09-20 - the send, straight through (released in 1.62.0)
 
 ### Changed

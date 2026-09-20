@@ -2121,12 +2121,19 @@ void loop() {
     // a page of a bench instrument inside Settings.
     case ST_MAIN: {
         {
+            // The two questions are asked SEPARATELY on purpose. "Did my own
+            // async sync land" and "did the printer list change" are not the
+            // same thing: a sign-in from the web page syncs synchronously, on
+            // this very loop, and leaves nothing for asyncTake to hand back.
+            // Nested, this test skipped that change entirely and the device
+            // kept an empty list until it was restarted - which is why signing
+            // in with an email used to reboot the box.
             String s;
-            if (ttcloud::asyncTake(s)) {
-                if (ttcloud::consumeChanged()) {
-                    loadCfg(); resultMsg = s;
-                    for (int i = 0; i < MAX_PRINTERS; i++) pLastSeen[i] = 0;
-                }
+            const bool took = ttcloud::asyncTake(s);
+            if (ttcloud::consumeChanged()) {
+                loadCfg();
+                if (took) resultMsg = s;
+                for (int i = 0; i < MAX_PRINTERS; i++) pLastSeen[i] = 0;
             }
         }
         int up = 0, total = 0;
@@ -2202,12 +2209,19 @@ void loop() {
         // on a printer never talked to the account at all, and came back with a
         // stale indicator that blamed the network for our own scheduling.
         {
+            // The two questions are asked SEPARATELY on purpose. "Did my own
+            // async sync land" and "did the printer list change" are not the
+            // same thing: a sign-in from the web page syncs synchronously, on
+            // this very loop, and leaves nothing for asyncTake to hand back.
+            // Nested, this test skipped that change entirely and the device
+            // kept an empty list until it was restarted - which is why signing
+            // in with an email used to reboot the box.
             String s;
-            if (ttcloud::asyncTake(s)) {
-                if (ttcloud::consumeChanged()) {
-                    loadCfg(); resultMsg = s;
-                    for (int i = 0; i < MAX_PRINTERS; i++) pLastSeen[i] = 0;
-                }
+            const bool took = ttcloud::asyncTake(s);
+            if (ttcloud::consumeChanged()) {
+                loadCfg();
+                if (took) resultMsg = s;
+                for (int i = 0; i < MAX_PRINTERS; i++) pLastSeen[i] = 0;
             }
         }
         startProbeTask();            // reachability, off the loop - see probeTaskFn
@@ -2729,8 +2743,7 @@ void loop() {
     }
 
     case ST_SCAN: {
-        screen_scan::showScan(backend ? backend->slotLabel(selSlot) : "?",
-                              resultMsg.length() ? resultMsg.c_str() : nullptr);
+        screen_scan::showScan(backend ? backend->slotLabel(selSlot) : "?");
         lvgl_port::loop();
 
         if (screen_scan::takeCancel()) {
@@ -2758,7 +2771,12 @@ void loop() {
                     sendWaiting = true;
                     state = ST_SENDING; stateSince = millis();
                 }
-                else resultMsg = reader::lastError();
+                // The reader's own complaint goes to the log, not onto the
+                // screen. A red line under "present the spool" while somebody
+                // is presenting the spool reads as a fault they have caused,
+                // and the fix it names - hold it closer - is what the screen
+                // is already asking for.
+                else Serial.printf("[reader] %s\n", reader::lastError().c_str());
             }
         }
         break;
@@ -2768,7 +2786,7 @@ void loop() {
         // The same screen the user is already looking at, unchanged: the
         // write is short, and a screen that appears and vanishes inside a
         // second reads as a fault rather than as progress.
-        screen_scan::showScan(backend ? backend->slotLabel(selSlot) : "?", nullptr, true);
+        screen_scan::showScan(backend ? backend->slotLabel(selSlot) : "?");
         lvgl_port::loop();
 
         // The chevron still works, and it is the only way out: it cancels

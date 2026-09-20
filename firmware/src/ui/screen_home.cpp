@@ -262,7 +262,11 @@ static void mainRow(lv_obj_t* parent, icons::Id icon, uint32_t colour,
     if (hint && *hint) {
         lv_obj_t* h = lv_label_create(col);
         lv_label_set_text(h, hint);
+        // ONE line, truncated. LV_LABEL_LONG_DOT wraps before it dots, and a
+        // translation one word too long for the row grew the label instead of
+        // cutting it - the second line pushed the row's own text off centre.
         lv_label_set_long_mode(h, LV_LABEL_LONG_DOT);
+        lv_obj_set_height(h, lv_font_get_line_height(&font_ui_12));
         lv_obj_set_width(h, LV_PCT(100));
         lv_obj_set_style_text_font(h, &font_ui_12, 0);
         lv_obj_set_style_text_color(h, lv_color_hex(theme::TEXT_DIM), 0);

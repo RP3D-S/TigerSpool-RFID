@@ -65,7 +65,6 @@ namespace {
         W_TT_HINT, W_TT_LOGIN, W_RETRY_NET, W_WIPE, W_NONE,
         W_SAVED, W_RESTART_JOIN, W_WIPED, W_RESTARTING, W_RETRY_SAVED,
         W_LOGIN_FAIL, W_ACCT_LINKED, W_SYNCED, W_FAILED, W_ACCT_OFF,
-        W_RESTART_SUFFIX,
         W_GOOGLE, W_EMAIL, W_OR, W_NO_ACCOUNT, W_SHOW_PW,
         W_PAIR_SCAN, W_PAIR_CODE, W_PAIR_WAIT, W_PAIR_DENIED, W_PAIR_EXPIRED,
         W_N
@@ -124,7 +123,6 @@ namespace {
         /* W_SYNCED       */ { "Sincronizado", "Synced", "Sincronizado", "Synchronise" },
         /* W_FAILED       */ { "Falhou", "Failed", "Fallo", "Echoue" },
         /* W_ACCT_OFF     */ { "Conta desligada", "Account disconnected", "Cuenta desconectada", "Compte deconnecte" },
-        /* W_RESTART_SUFFIX*/{ " - a reiniciar...", " - restarting...", " - reiniciando...", " - redemarrage..." },
         /* W_GOOGLE       */ { "Continuar com Google", "Continue with Google",
                               "Continuar con Google", "Continuer avec Google" },
         /* W_EMAIL        */ { "Endereço de e-mail", "Email address",
@@ -454,8 +452,7 @@ namespace {
         // The everyday loop: present the spool, confirm it, and the receipt
         // that tells you where to put it. `resultlong` is the layout's worst
         // case - a printer whose slots are called AMS2-4.
-        else if (preview == "scan")      screen_scan::showScan("B2", nullptr);
-        else if (preview == "sending")   screen_scan::showScan("B2", nullptr, true);
+        else if (preview == "scan")      screen_scan::showScan("B2");
         else if (preview == "result")    screen_scan::showResult("B2", true, "", previewTag(), 3200);
         else if (preview == "resultlong") screen_scan::showResult("AMS2-4", true, "", previewTag(), 5000);
         else if (preview == "resultfail") screen_scan::showResult("B2", false,
@@ -1096,20 +1093,29 @@ namespace {
         server.send(200, "text/html", h);
     }
 
+    // Signing in does NOT restart the device.
+    //
+    // It used to, and it was the difference a user reported between the two
+    // routes: sign in with Google and the device carries on, sign in with an
+    // email and it reboots. Nothing about an email sign-in needs a reboot -
+    // the session is in NVS, the printer list has just been fetched, and the
+    // state machine notices both. The restart was there because the loop only
+    // reloaded the list when IT had asked for the sync; a sync done from the
+    // web page landed in NVS with nobody reading it back. That is fixed where
+    // it belongs, in main.cpp, rather than by restarting a working device in
+    // front of somebody who has just typed their password.
     void handleTtLogin() {
         String mail = server.arg("ttmail"); mail.trim();
         String pass = server.arg("ttpass");
         String err;
         if (!ttcloud::signIn(mail, pass, err)) { reply(wl(W_LOGIN_FAIL), err); return; }
         String s; ttcloud::syncNow(s);
-        reply(wl(W_ACCT_LINKED), s + wl(W_RESTART_SUFFIX));
-        restartAt = millis() + 1600;
+        reply(wl(W_ACCT_LINKED), s);
     }
     void handleTtSync() {
         String s;
         bool ok = ttcloud::syncNow(s);
-        reply(ok ? wl(W_SYNCED) : wl(W_FAILED), s + wl(W_RESTART_SUFFIX));
-        restartAt = millis() + 1600;
+        reply(ok ? wl(W_SYNCED) : wl(W_FAILED), s);
     }
     void handleTtForget() {
         ttcloud::forget();
@@ -1235,8 +1241,7 @@ namespace {
             g_pairTok = "";
             if (!ttcloud::signInWithCustomToken(ct, em, err)) { reply(wl(W_LOGIN_FAIL), err); return; }
             String s; ttcloud::syncNow(s);
-            reply(wl(W_ACCT_LINKED), s + wl(W_RESTART_SUFFIX));
-            restartAt = millis() + 1600;
+            reply(wl(W_ACCT_LINKED), s);
         } else if (st == 2) {
             g_pairTok = ""; reply(wl(W_PAIR_DENIED), wl(W_RESTARTING)); restartAt = millis() + 1500;
         } else if (st == 3) {

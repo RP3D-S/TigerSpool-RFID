@@ -8,11 +8,14 @@ namespace screen_scan {
 // No status dots: reaching this screen already proves the printer answered and
 // the tap came off its slot grid, so a pair of green dots would only repeat
 // what the user just did.
-// It also stays up while the spool is being written to the printer: the write
-// gets no screen, not even a word - it is over before one could be read.
-// `caught` says the chip has been read and the write is under way; it takes
-// the Cancel button away, because there is nothing left to cancel.
-void showScan(const char* slotLabel, const char* errorOrNull, bool caught = false);
+// It also stays up, unchanged, while the spool is being written to the
+// printer: the write gets no screen and not even a word - it is over before
+// one could be read.
+// A read that fails is NOT reported here. The screen already says what to do -
+// hold the spool against the box - and a red line saying the same thing under
+// somebody who is doing exactly that reads as a fault of their own. The
+// reader's error goes to the serial log.
+void showScan(const char* slotLabel);
 
 // The success screen confirms what was SENT and names the next step: put the
 // spool in that slot. It deliberately says nothing about what the slot held

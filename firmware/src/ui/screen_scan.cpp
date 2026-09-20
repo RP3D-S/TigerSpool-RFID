@@ -43,29 +43,11 @@ void invalidate() { s_which = NONE; s_sig = 0; }
 // proof: the slot grid is only reachable through a printer that answered, and
 // the tap that opened this screen came off that grid. A pair of green dots
 // repeating it spends the top of the panel saying what the user just did.
-// The Cancel button of the scan screen, kept so its state can change without
-// the screen being rebuilt around it.
-static lv_obj_t* s_scanCancel = nullptr;
-
-// Invisible and unpressable, or back to normal. Not hidden and not deleted -
-// LVGL's flex layout skips a hidden child, and the column would re-centre.
-static void setCancelVisible(bool on) {
-    if (!s_scanCancel) return;
-    lv_obj_set_style_opa(s_scanCancel, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-    if (on) lv_obj_add_flag(s_scanCancel, LV_OBJ_FLAG_CLICKABLE);
-    else    lv_obj_clear_flag(s_scanCancel, LV_OBJ_FLAG_CLICKABLE);
-}
-
-void showScan(const char* slotLabel, const char* errorOrNull, bool caught) {
+void showScan(const char* slotLabel) {
     lvgl_port::Lock lvglGuard;   // LVGL is not reentrant - see lvgl_port.h
-    // `caught` is NOT in the signature. It only decides whether one button is
-    // drawn, and rebuilding the screen for it restarts the spinner from zero -
-    // the animation jumps at the exact moment the chip is read, which reads as
-    // the device having lost its place.
-    uint32_t sig = hashStr(slotLabel) ^ hashStr(errorOrNull ? errorOrNull : "");
-    if (s_which == SCAN && sig == s_sig) { setCancelVisible(!caught); return; }
+    uint32_t sig = hashStr(slotLabel);
+    if (s_which == SCAN && sig == s_sig) return;
     s_which = SCAN; s_sig = sig;
-    s_scanCancel = nullptr;
 
     // The slot's name alone, exactly as the receipt at the end of the flow
     // titles itself. Those two screens are the same moment seen twice - before
@@ -81,26 +63,17 @@ void showScan(const char* slotLabel, const char* errorOrNull, bool caught) {
     frame::caption(i18n::T(S_BRING_TAG), theme::TEXT, &font_ui_14);
     frame::caption(i18n::T(S_TO_READER), theme::TEXT, &font_ui_14);
 
-    // A failed read names the fix rather than the fault: "move it closer" is
-    // actionable, "read error" sends someone to a forum.
-    if (errorOrNull && *errorOrNull)
-        frame::caption(errorOrNull, theme::DANGER);
-
     // Tone 0, not the destructive red. Cancelling a scan throws nothing away -
     // it wore the same colour as Sign out and Factory reset, which teaches
     // people to hesitate over the one button on this screen that is harmless.
     //
-    // It goes once the chip has been caught. This screen stands through the
-    // write itself - sending is over before a screen of its own could be read -
-    // but from the instant the spool is taken there is nothing left to call
-    // off, and a button that would do nothing is worse than no button.
-    //
-    // Made INVISIBLE, not removed: LVGL's flex layout skips a hidden child, so
-    // deleting it or hiding it re-centres the column and walks the spinner and
-    // the words down the screen at the exact moment the user is watching them.
-    // The button keeps its place and stops being drawn or pressed.
-    s_scanCancel = frame::button(body, i18n::T(S_CANCEL), 0, onCancel);
-    setCancelVisible(!caught);
+    // It stays for the whole of this screen's life, including the write that
+    // follows the read. Taking it away the instant the chip was caught was
+    // tried and thrown out: the write is short, so the button vanished a
+    // fraction of a second before the screen changed anyway - a flicker on the
+    // way out, which is exactly the kind of movement that makes a device feel
+    // unsteady. Nothing moves now.
+    frame::button(body, i18n::T(S_CANCEL), 0, onCancel);
 }
 
 // How long the success screen stays up on its own, and the bar that shows it

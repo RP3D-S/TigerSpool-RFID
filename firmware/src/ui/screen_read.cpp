@@ -34,6 +34,10 @@ void factRow(lv_obj_t* parent, const char* key, const char* value) {
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_bottom(row, 4, 0);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    // An LVGL container is clickable from birth and a click does not bubble.
+    // These rows cover most of the screen, and the screen is one big back
+    // button - see showTag.
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t* k = lv_label_create(row);
     lv_label_set_text(k, key);
@@ -102,6 +106,20 @@ void showTag(const TagInfo& tag) {
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
 
+    // The whole screen goes back, not just the chevron. Somebody holding a
+    // spool in one hand has read what they came for; making them find a 56 px
+    // target in the corner to leave is a tax on the one hand they have free.
+    //
+    // The handler is on the screen AND the containers over it: a click does
+    // not bubble in LVGL, and the body covers everything under the header.
+    auto backCb = [](lv_event_t*) { s_back = true; };
+    lv_obj_add_flag(frame::screen(), LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(frame::screen(), backCb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_flag(body, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(body, backCb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_flag(frame::header(), LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(frame::header(), backCb, LV_EVENT_CLICKED, nullptr);
+
     // Genuine, in the header rather than in the body: it is a property of the
     // chip, not a field of the spool, and putting it among the temperatures
     // would give it a weight it does not deserve until it is WRONG.
@@ -132,6 +150,7 @@ void showTag(const TagInfo& tag) {
     lv_obj_set_style_border_width(disc, 2, 0);
     lv_obj_set_style_border_opa(disc, LV_OPA_COVER, 0);
     lv_obj_clear_flag(disc, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(disc, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t* mat = lv_label_create(body);
     lv_label_set_text(mat, tag.material.length() ? tag.material.c_str() : "?");
