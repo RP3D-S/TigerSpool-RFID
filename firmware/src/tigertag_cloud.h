@@ -91,4 +91,44 @@ namespace ttcloud {
     // 0 while running, 1 when the code is ready, -1 on failure.
     int    pairAsyncTake(String& code, String& verifyUrl, String& pollToken,
                          int& intervalS, String& err);
+
+    // ---- presence: what this device tells the account about itself ----------
+    //
+    // Studio draws a device list out of these documents, so the identity,
+    // liveness and power fields carry the SAME names a TigerScale writes. An
+    // online dot and a battery icon must not have to know which product they
+    // are looking at. See docs/PRESENCE.md for the whole contract.
+
+    // The device document id: the Wi-Fi MAC, lowercase hex, no separators.
+    // It is the identity of this box in the account, so its FORMAT is frozen -
+    // change it and every device already registered is orphaned under its old
+    // id, with no way to notice from the device side.
+    String deviceId();
+
+    struct Presence {
+        // liveness and power, in the shared vocabulary
+        int    wifiDbm        = 0;      // 0 when not connected -> written null
+        String ip;
+        bool   batteryPresent = false;
+        int    batteryPercent = -1;     // <0 -> written null
+        bool   charging       = false;
+        bool   chargingKnown  = false;  // false -> written null
+        bool   onUsb          = true;
+        bool   screenOff      = false;
+
+        // what a TigerSpool is, that a scale is not
+        int           printersActive = 0;
+        const String* printerIds     = nullptr;   // account document ids
+        int           printerIdCount = 0;
+        // A spool was written to a printer since the last beat. It turns into
+        // last_used_at, stamped by the SERVER: this device has no clock it can
+        // vouch for - no RTC, no NTP - so a time it wrote itself would be a
+        // guess presented as a fact.
+        bool          usedNow        = false;
+    };
+
+    // One Firestore commit, blocking, about a second. `full` also writes the
+    // identity block and reads display_name before writing it, so a name typed
+    // in Studio is never trampled. Fields outside the mask are untouched.
+    bool heartbeat(const Presence& p, bool full, String& err);
 }

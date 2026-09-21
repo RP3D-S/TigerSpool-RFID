@@ -18,6 +18,32 @@ message, and reset it to this header.
 
 ## Unreleased
 
+## 2026-09-21 - the device declares itself (released in 1.64.0)
+
+### Added
+
+- Presence: `ttcloud::heartbeat()` and `ttcloud::deviceId()`, plus the
+  scheduler in main.cpp (`presenceTick` / `presenceWatch`). One Firestore
+  `documents:commit` with an updateMask, `last_heartbeat_at` as REQUEST_TIME,
+  full-then-deltas, explicit nulls, display_name read before written.
+  `docs/PRESENCE.md` holds the contract.
+- `PrinterCfg::docId`: the printer's document id in the account, captured at
+  import and kept in NVS as ONE newline-separated key (`pids`). Twenty-four
+  separate keys would have cost about fifty of the hundred and thirty NVS
+  entries this device has left, in a partition that cannot grow over the air.
+- pairStart now sends kind `tigerspool`, model `TigerSpool`, the real version
+  and the mDNS name.
+- A change of IP address forces a beat. It is what somebody uses to reach the
+  box, and the moment they need it is right after the router handed out a
+  different one.
+
+**Blocked on Firebase.** Every beat comes back `403 PERMISSION_DENIED` on the
+bench: the account's security rules do not name this path yet. The rule needed
+is in `docs/PRESENCE.md`. Until it lands, the code is verified only as far as
+"builds, runs, sends a well-formed commit and backs off when refused" - which
+it does: three refusals hold the next beat for five minutes, confirmed on the
+bench board (4 attempts in 80 s, then the hold).
+
 ## 2026-09-20 - the sign-in reboot, and the scan flow settled (released in 1.63.0)
 
 ### Fixed

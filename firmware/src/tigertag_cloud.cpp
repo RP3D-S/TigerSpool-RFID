@@ -10,6 +10,7 @@
 #include <Preferences.h>
 #include <initializer_list>
 #include <mbedtls/base64.h>
+#include "version.h"
 
 namespace {
     // TigerTag's public Firebase client config. Not a secret: it is served
@@ -20,6 +21,11 @@ namespace {
     const uint32_t SYNC_INTERVAL_MS = 5UL * 60 * 1000;   // 5 min
     // Pairing Cloud Functions, used by the QR/link flow (Google sign-in, so
     // no password ever reaches the device)
+    // Defined with the presence code at the foot of this file; declared here
+    // because the pairing call names the device too.
+    String macHex();
+    String mdnsName();
+
     const char* PAIR_START = "https://us-central1-tigertag-connect.cloudfunctions.net/pairStart";
     const char* PAIR_POLL  = "https://us-central1-tigertag-connect.cloudfunctions.net/pairPoll";
 
@@ -314,11 +320,15 @@ static String uidFromIdToken(const String& jwt) {
 
 bool ttcloud::pairStart(String& code, String& verifyUrl, String& pollToken,
                         int& intervalS, String& err) {
+    // What the pairing page tells the owner they are adopting, and what the
+    // account records this device as. It said "TigerTag Bridge", a name from
+    // the prototype, and reported "cfs_ui" as its firmware version - a string
+    // that was never a version at all.
     JsonDocument d;
-    d["device"] = String("tigertag-") + String((uint32_t)ESP.getEfuseMac(), HEX);
-    d["model"]  = "TigerTag Bridge";
-    d["kind"]   = "bridge";
-    d["fw"]     = "cfs_ui";
+    d["device"] = mdnsName();
+    d["model"]  = "TigerSpool";
+    d["kind"]   = "tigerspool";
+    d["fw"]     = TIGERSPOOL_FW_VERSION;
     String body; serializeJson(d, body);
     String resp;
     int hc = httpsPOST(PAIR_START, body, resp);
@@ -637,6 +647,7 @@ bool ttcloud::syncNow(String& summary) {
             if (ip.isEmpty()) { noip++; Serial.println("[account]     no IP - imported anyway (fill it in on the form)"); }
 
             PrinterCfg& p = got[n];
+            p.docId = dev;
             p.type = t;
             p.cloud = cloud;
             p.name = fsStr(f, "printerName");
@@ -852,6 +863,21 @@ bool ttcloud::syncNow(String& summary) {
             }
         }
     }
+    // The account document ids, positional, in ONE key.
+    //
+    // Twenty-four more string keys would cost about fifty NVS entries out of
+    // the hundred and thirty this device has left, in a partition that is
+    // frozen and cannot grow over the air. One newline-separated string costs
+    // a fraction of that and is written only when it changes.
+    {
+        String ids;
+        for (int i = 0; i < MAX_PRINTERS; i++) {
+            if (i < n) ids += got[i].docId;
+            ids += '\n';
+        }
+        if (ids != k.getString("pids", "")) k.putString("pids", ids);
+    }
+
     // The selected printer follows its printer, not its position.
     if (newSel >= 0 && newSel != oldSel) {
         k.putInt("printerIdx", newSel);
@@ -1029,5 +1055,185 @@ bool ttcloud::asyncTake(String& summary) {
     if (!g_asyncDone) return false;
     g_asyncDone = false;
     summary = g_asyncSummary;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+//  Presence: the device's own document in the account.
+//
+//  users/{uid}/tigerspool/{mac}, one `documents:commit` per beat. The shape is
+//  the TigerScale's, deliberately - see docs/PRESENCE.md.
+// ---------------------------------------------------------------------------
+namespace {
+
+String macHex() {
+    uint8_t m[6] = {0};
+    WiFi.macAddress(m);
+    char b[13];
+    snprintf(b, sizeof(b), "%02x%02x%02x%02x%02x%02x", m[0], m[1], m[2], m[3], m[4], m[5]);
+    return String(b);
+}
+
+String mdnsName() {
+    uint8_t m[6] = {0};
+    WiFi.macAddress(m);
+    char b[32];
+    snprintf(b, sizeof(b), "tigerspool-%02x%02x.local", m[4], m[5]);
+    return String(b);
+}
+
+String defaultDisplayName() {
+    uint8_t m[6] = {0};
+    WiFi.macAddress(m);
+    char b[24];
+    snprintf(b, sizeof(b), "TigerSpool-%02X%02X", m[4], m[5]);
+    return String(b);
+}
+
+// What the last beat said, so the next one can send only what moved.
+struct Sent {
+    bool   have = false;
+    int    wifiDbm = 0;
+    String ip;
+    bool   batteryPresent = false;
+    int    batteryPercent = -1;
+    bool   charging = false, chargingKnown = false;
+    bool   onUsb = true, screenOff = false;
+    int    printersActive = -1;
+    String printerIds;      // joined, for comparison only
+} g_sent;
+
+String joinIds(const ttcloud::Presence& p) {
+    String j;
+    for (int i = 0; i < p.printerIdCount; i++) { j += p.printerIds[i]; j += ','; }
+    return j;
+}
+
+}  // namespace
+
+String ttcloud::deviceId() { return macHex(); }
+
+bool ttcloud::heartbeat(const Presence& p, bool full, String& err) {
+    if (g_uid.isEmpty()) { err = "no account"; return false; }
+    if (!ensureToken())  { err = "no token";   return false; }
+
+    const String base = String("https://firestore.googleapis.com/v1/projects/") + PROJECT +
+                        "/databases/(default)/documents";
+    const String path = String("users/") + g_uid + "/tigerspool/" + macHex();
+
+    // display_name is READ before it is written, and only on a full beat.
+    // Without this, a name somebody types in Studio lives until the next
+    // heartbeat - thirty seconds - and then the device puts its own back.
+    String name = defaultDisplayName();
+    if (full) {
+        String resp;
+        const int hc = httpsGET(base + "/" + path + "?mask.fieldPaths=display_name",
+                                resp, g_idToken.c_str());
+        if (hc == 200) {
+            JsonDocument r;
+            if (!deserializeJson(r, resp)) {
+                const String cur = r["fields"]["display_name"]["stringValue"] | "";
+                if (cur.length()) name = cur;
+            }
+        }
+        // 404 is the ordinary first beat: the document does not exist yet.
+    }
+
+    JsonDocument d;
+    JsonObject w  = d["writes"].add<JsonObject>();
+    JsonObject up = w["update"].to<JsonObject>();
+    up["name"] = String("projects/") + PROJECT + "/databases/(default)/documents/" + path;
+    JsonObject f = up["fields"].to<JsonObject>();
+    JsonArray  mask = w["updateMask"]["fieldPaths"].to<JsonArray>();
+
+    auto putStr = [&](const char* key, const String& v) {
+        f[key]["stringValue"] = v; mask.add(key);
+    };
+    auto putInt = [&](const char* key, int v) {
+        f[key]["integerValue"] = String(v); mask.add(key);
+    };
+    auto putBool = [&](const char* key, bool v) {
+        f[key]["booleanValue"] = v; mask.add(key);
+    };
+    // Explicitly null, never absent. An omitted field keeps whatever was there
+    // before, so a box that once had a battery would read as having one for
+    // ever after it was taken out.
+    auto putNull = [&](const char* key) {
+        f[key]["nullValue"] = "NULL_VALUE"; mask.add(key);
+    };
+
+    if (full) {
+        putStr("mac", macHex());
+        putStr("fw_version", TIGERSPOOL_FW_VERSION);
+        putStr("mdns_hostname", mdnsName());
+        putStr("display_name", name);
+        putNull("hardware_revision");
+    }
+
+    const bool first = full || !g_sent.have;
+    if (first || p.wifiDbm != g_sent.wifiDbm) {
+        if (p.wifiDbm) putInt("wifi_signal_dbm", p.wifiDbm); else putNull("wifi_signal_dbm");
+    }
+    if (first || p.ip != g_sent.ip)                         putStr("ip_address", p.ip);
+    if (first || p.onUsb != g_sent.onUsb)                   putStr("power_source", p.onUsb ? "usb" : "battery");
+    if (first || p.screenOff != g_sent.screenOff)           putStr("power_state", p.screenOff ? "screen_off" : "active");
+    if (first || p.batteryPresent != g_sent.batteryPresent) putBool("battery_present", p.batteryPresent);
+    if (first || p.batteryPercent != g_sent.batteryPercent) {
+        if (p.batteryPercent >= 0) putInt("battery_percent", p.batteryPercent);
+        else                       putNull("battery_percent");
+    }
+    if (first || p.charging != g_sent.charging || p.chargingKnown != g_sent.chargingKnown) {
+        if (p.chargingKnown) putBool("is_charging", p.charging);
+        else                 putNull("is_charging");
+    }
+
+    if (first || p.printersActive != g_sent.printersActive)
+        putInt("printers_active", p.printersActive);
+
+    const String ids = joinIds(p);
+    if (first || ids != g_sent.printerIds) {
+        JsonArray arr = f["printer_ids"]["arrayValue"]["values"].to<JsonArray>();
+        for (int i = 0; i < p.printerIdCount; i++)
+            arr.add<JsonObject>()["stringValue"] = p.printerIds[i];
+        mask.add("printer_ids");
+    }
+
+    // The server stamps the time, always. "Is this device online" is then
+    // `now - last_heartbeat_at < 2 * interval` decided by the server's own
+    // clock, which is true whatever this box believes the time to be.
+    JsonArray tr = w["updateTransforms"].to<JsonArray>();
+    {
+        JsonObject t = tr.add<JsonObject>();
+        t["fieldPath"] = "last_heartbeat_at";
+        t["setToServerValue"] = "REQUEST_TIME";
+    }
+    if (p.usedNow) {
+        JsonObject t = tr.add<JsonObject>();
+        t["fieldPath"] = "last_used_at";
+        t["setToServerValue"] = "REQUEST_TIME";
+    }
+
+    String body; serializeJson(d, body);
+    String resp;
+    const int hc = httpsPOST(base + ":commit", body, resp, g_idToken.c_str());
+    if (hc != 200) {
+        err = String("heartbeat http ") + hc;
+        Serial.printf("[presence] %s: %.160s\n", err.c_str(), resp.c_str());
+        return false;
+    }
+
+    // The snapshot moves only on success, so a failed full beat is retried as
+    // a full beat rather than leaving Studio with half a document.
+    g_sent.have = true;
+    g_sent.wifiDbm = p.wifiDbm;
+    g_sent.ip = p.ip;
+    g_sent.batteryPresent = p.batteryPresent;
+    g_sent.batteryPercent = p.batteryPercent;
+    g_sent.charging = p.charging;
+    g_sent.chargingKnown = p.chargingKnown;
+    g_sent.onUsb = p.onUsb;
+    g_sent.screenOff = p.screenOff;
+    g_sent.printersActive = p.printersActive;
+    g_sent.printerIds = ids;
     return true;
 }

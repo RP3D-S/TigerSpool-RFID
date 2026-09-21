@@ -7,6 +7,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.64.0] - 2026-09-21
+
+### Added
+
+- **The device declares itself to the TigerTag account.** It writes
+  `users/{uid}/tigerspool/{mac}` every 30 seconds - every 5 minutes with the
+  screen off, and at once when a spool is written or a cable moves - so Tiger
+  Studio can list it, show whether it is online, and see which printers it
+  stands in front of. The identity, liveness and battery fields carry the same
+  names a TigerScale writes. See `docs/PRESENCE.md`.
+- The pairing page now says what it is adopting: `TigerSpool`, with the real
+  firmware version. It announced itself as a "TigerTag Bridge" running `cfs_ui`.
+
+  **The account's security rules must name this path before any of it is
+  allowed** - every beat is refused until they do, and the device holds off for
+  five minutes after three refusals rather than retrying for ever. The rule is
+  in `docs/PRESENCE.md`. Several TigerSpools on one account are supported by
+  construction: one document each, keyed by MAC.
+
 ## [1.63.0] - 2026-09-20
 
 ### Fixed

@@ -477,6 +477,18 @@ static void loadCfg() {
         snprintf(k, sizeof(k), "p%dk", i); printers[i].cloud = nvs.getBool(k, false);
         snprintf(k, sizeof(k), "p%dv", i); printers[i].visible = nvs.getBool(k, true);
     }
+    // The account document ids, positional, newline-separated in one key - see
+    // the sync's own note on why they are not twenty-four keys.
+    {
+        const String ids = nvs.getString("pids", "");
+        int at = 0;
+        for (int i = 0; i < MAX_PRINTERS && at <= (int)ids.length(); i++) {
+            const int nl = ids.indexOf('\n', at);
+            if (nl < 0) break;
+            printers[i].docId = ids.substring(at, nl);
+            at = nl + 1;
+        }
+    }
     String oldK2 = nvs.getString("k2ip", "");
     nvs.end();
 
@@ -1506,6 +1518,116 @@ static void staBegin() {
 static const uint32_t ROAM_CHECK_MS      = 60000;
 static const int8_t   ROAM_HYSTERESIS_DB = 8;
 
+// ---- presence: telling the account this device is here ---------------------
+//
+// One Firestore write, so Studio can list this TigerSpool, show it online and
+// know which printers it is standing in front of. The contract - the field
+// names, the server timestamp, the full-then-deltas rule - is the TigerScale's,
+// on purpose: see docs/PRESENCE.md.
+//
+// Two cadences and a force flag. Thirty seconds awake, five minutes with the
+// screen off, and immediately for anything a PERSON does and then watches for:
+// a spool written, a cable plugged, the screen going dark. Those are the beats
+// somebody is waiting on, and making them wait five minutes reads as an app
+// that has lost the device.
+static uint32_t presenceAt    = 0;
+static bool     presenceFull  = true;    // the next beat writes identity too
+static bool     presenceForce = true;
+static bool     presenceUsed  = false;   // a spool was written since the last beat
+static uint32_t presenceHold  = 0;       // millis until which beats are held off
+
+static void presenceTick() {
+    if (!ttcloud::haveSession() || WiFi.status() != WL_CONNECTED) return;
+    // One TLS session at a time. The account sync, the product endpoint and
+    // this all want the same 16 KB contiguous block, and two of them at once
+    // is how the device ends up with none.
+    if (ttcloud::asyncBusy() || ttcloud::needsRoom()) return;
+
+    // Signed difference, so a hold in the future is a hold: `millis() - hold`
+    // on unsigned values is enormous rather than negative, which is how a
+    // back-off turns into a free pass.
+    if (presenceHold && (int32_t)(millis() - presenceHold) < 0) return;
+
+    const uint32_t every = lvgl_port::asleep() ? 300000UL : 30000UL;
+    if (!presenceForce && presenceAt && millis() - presenceAt < every) return;
+
+    // No room for a handshake: skip this beat rather than fail it. The next
+    // one is thirty seconds away and the heap moves constantly.
+    if (ESP.getMaxAllocHeap() < 24000) { presenceAt = millis(); return; }
+
+    ttcloud::Presence p;
+    p.wifiDbm        = WiFi.isConnected() ? WiFi.RSSI() : 0;
+    p.ip             = WiFi.localIP().toString();
+    p.batteryPresent = battery::present();
+    p.batteryPercent = battery::present() ? battery::percent() : -1;
+    p.charging       = battery::charging();
+    p.chargingKnown  = battery::present();
+    // This board has no USB-detect line. With no cell there is nothing else it
+    // could be running on; with one, the charger holding the rail up is the
+    // only evidence available. Stated here rather than guessed at in Studio.
+    p.onUsb          = !battery::present() || battery::charging();
+    p.screenOff      = lvgl_port::asleep();
+    p.usedNow        = presenceUsed;
+
+    static String ids[MAX_PRINTERS];
+    int nIds = 0, active = 0;
+    for (int i = 0; i < MAX_PRINTERS; i++) {
+        if (printers[i].type == PT_NONE || !printers[i].visible) continue;
+        active++;
+        if (printers[i].docId.length()) ids[nIds++] = printers[i].docId;
+    }
+    p.printersActive = active;
+    p.printerIds     = ids;
+    p.printerIdCount = nIds;
+
+    String err;
+    const bool ok = ttcloud::heartbeat(p, presenceFull, err);
+    presenceAt = millis();
+    // The force flag is spent whatever happens. Left set on a failure it
+    // bypasses the rate limit on the very next pass, and a device whose
+    // account refuses the write - wrong rules, expired token - hammers it
+    // several times a second instead of once every thirty.
+    presenceForce = false;
+    static int fails = 0;
+    if (ok) {
+        if (presenceFull) Serial.printf("[presence] registered as %s\n",
+                                        ttcloud::deviceId().c_str());
+        // A failed full beat STAYS full: half a document in Studio is worse
+        // than a document that appears thirty seconds later.
+        presenceFull = false; presenceUsed = false; fails = 0;
+    } else if (++fails >= 3) {
+        // Three refusals in a row is not a passing fault. Hold off for five
+        // minutes so a misconfigured account costs a beat now and then rather
+        // than a TLS handshake every thirty seconds, for ever.
+        presenceHold = millis() + 300000UL;
+        if (fails == 3) Serial.printf("[presence] holding off 5 min: %s\n", err.c_str());
+    }
+}
+
+// Anything a person performs and then looks for. Called every pass; it only
+// costs a handful of comparisons.
+static void presenceWatch() {
+    static bool wasCharging = false, wasPresent = false, wasAsleep = false;
+    static int  wasActive = -1;
+    static uint32_t wasIp = 0;
+    int active = 0;
+    for (int i = 0; i < MAX_PRINTERS; i++)
+        if (printers[i].type != PT_NONE && printers[i].visible) active++;
+    const bool charging = battery::charging(), present = battery::present();
+    const bool asleep = lvgl_port::asleep();
+    // A new address is worth a beat of its own. It is what somebody uses to
+    // reach the box - and the moment they need it is right after the router
+    // handed out a different one, which is exactly when a five-minute-old
+    // document is wrong.
+    const uint32_t ip = WiFi.isConnected() ? (uint32_t)WiFi.localIP() : 0;
+    if (charging != wasCharging || present != wasPresent ||
+        asleep != wasAsleep || active != wasActive || ip != wasIp) {
+        wasCharging = charging; wasPresent = present;
+        wasAsleep = asleep; wasActive = active; wasIp = ip;
+        presenceForce = true;
+    }
+}
+
 static void roamCheck() {
     static uint32_t lastCheck   = 0;
     static bool     scanPending = false;
@@ -1792,6 +1914,8 @@ void loop() {
     }
     linkTick();                  // keep the printer links up, everywhere
     battery::loop();             // one ADC read every two seconds
+    presenceWatch();             // notice what deserves an immediate beat
+    presenceTick();              // and tell the account this device is here
     if (webStarted || webcfg::apActive()) webcfg::loop();
 
     // A Google pairing started from the phone puts the same QR on this screen
@@ -2810,6 +2934,9 @@ void loop() {
                                  (backend && backend->connected()) ? i18n::T(S_SEND_FAIL)
                                                                    : i18n::T(S_PRINTER_OFF));
             resultMsg = m;
+            // The one event worth interrupting the cadence for: Studio's
+            // "last used" is what tells a user which box did the job.
+            if (sendOk) { presenceUsed = true; presenceForce = true; }
             // Re-read the printer's own state: several of these protocols
             // acknowledge a command they ignored, so the colour that actually
             // landed is the only thing worth showing.
