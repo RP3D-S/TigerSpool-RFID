@@ -7,6 +7,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Email sign-in no longer crashes the device.** The web handler runs on the
+  loop task and nests a TLS handshake inside it (handleTtLogin, syncNow,
+  httpsGET, mbedtls ctr_drbg_seed). On the core's default 8 KB stack that
+  tripped the stack canary the moment the login succeeded, so the device
+  rebooted with nothing saved. The loop task now gets 16 KB. Verified on the
+  bench: an email sign-in completes, syncs five printers and registers
+  presence with no reset.
+
 ## [1.66.0] - 2026-09-21
 
 ### Changed
