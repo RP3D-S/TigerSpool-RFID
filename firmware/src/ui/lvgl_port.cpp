@@ -353,4 +353,9 @@ void sleepTick(int timeoutSec, uint8_t awakeBrightness) {
 
 bool asleep() { return s_asleep; }
 
+uint32_t sinceTouchMs() {
+    const uint32_t t = s_lastTouch;
+    return t ? (millis() - t) : 0xFFFFFFFFu;
+}
+
 }  // namespace lvgl_port

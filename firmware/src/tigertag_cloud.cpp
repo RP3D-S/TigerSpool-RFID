@@ -31,6 +31,9 @@ namespace {
 
     Preferences pr;
     String   g_email, g_refresh, g_uid, g_idToken, g_name;
+    // The printers' document ids in the account, by position, refreshed by
+    // every sync - see the note where they are filled.
+    String   g_docIds[MAX_PRINTERS];
     uint32_t g_tokenAt = 0, g_lastSync = 0, g_bootAt = 0;
     bool     g_changed = false;
     String   g_lastResult = "";
@@ -647,7 +650,10 @@ bool ttcloud::syncNow(String& summary) {
             if (ip.isEmpty()) { noip++; Serial.println("[account]     no IP - imported anyway (fill it in on the form)"); }
 
             PrinterCfg& p = got[n];
-            p.docId = dev;
+            // The account's own id for this printer, kept beside the import
+            // rather than inside PrinterCfg: it is never stored, never used to
+            // talk to the printer, and exists only to be published.
+            g_docIds[n] = dev;
             p.type = t;
             p.cloud = cloud;
             p.name = fsStr(f, "printerName");
@@ -863,20 +869,20 @@ bool ttcloud::syncNow(String& summary) {
             }
         }
     }
-    // The account document ids, positional, in ONE key.
+    // The account document ids are kept in RAM, NOT in NVS.
     //
-    // Twenty-four more string keys would cost about fifty NVS entries out of
-    // the hundred and thirty this device has left, in a partition that is
-    // frozen and cannot grow over the air. One newline-separated string costs
-    // a fraction of that and is written only when it changes.
-    {
-        String ids;
-        for (int i = 0; i < MAX_PRINTERS; i++) {
-            if (i < n) ids += got[i].docId;
-            ids += '\n';
-        }
-        if (ids != k.getString("pids", "")) k.putString("pids", ids);
-    }
+    // They were a newline-separated key for one afternoon, and the device said
+    // no: `putString` returned 0 for a 361-byte string with 130 free entries.
+    // NVS wants a blob's entries contiguous inside one page, and this
+    // partition - 500 of 630 entries used, frozen at 20 KB, un-growable over
+    // the air - no longer has a run that long. Per-printer keys would fit
+    // today and eat forty of the hundred and thirty that are left.
+    //
+    // So they live here instead, filled by every sync. The cost is that a
+    // freshly booted device publishes no ids until its first sync of the boot,
+    // which is a minute or two. That is a far smaller problem than spending a
+    // third of the remaining flash on something the account can always resend.
+    for (int i = n; i < MAX_PRINTERS; i++) g_docIds[i] = String();
 
     // The selected printer follows its printer, not its position.
     if (newSel >= 0 && newSel != oldSel) {
@@ -1195,7 +1201,8 @@ bool ttcloud::heartbeat(const Presence& p, bool full, String& err) {
         putInt("printers_active", p.printersActive);
 
     const String ids = joinIds(p);
-    if (first || ids != g_sent.printerIds) {
+    const bool idsChanged = (ids != g_sent.printerIds);
+    if (first || idsChanged) {
         JsonArray arr = f["printer_ids"]["arrayValue"]["values"].to<JsonArray>();
         for (int i = 0; i < p.printerIdCount; i++)
             arr.add<JsonObject>()["stringValue"] = p.printerIds[i];
@@ -1226,6 +1233,13 @@ bool ttcloud::heartbeat(const Presence& p, bool full, String& err) {
         return false;
     }
 
+    // Logged when it changes, never on the ordinary beat: this is the one
+    // field whose emptiness is invisible from the device - it publishes fine
+    // and says nothing - so it gets a line the day it moves.
+    if (first || idsChanged)
+        Serial.printf("[presence] %d printer(s) active, %d id(s): %s\n",
+                      p.printersActive, p.printerIdCount, ids.c_str());
+
     // The snapshot moves only on success, so a failed full beat is retried as
     // a full beat rather than leaving Studio with half a document.
     g_sent.have = true;
@@ -1240,4 +1254,8 @@ bool ttcloud::heartbeat(const Presence& p, bool full, String& err) {
     g_sent.printersActive = p.printersActive;
     g_sent.printerIds = ids;
     return true;
+}
+
+String ttcloud::printerDocId(int i) {
+    return (i >= 0 && i < MAX_PRINTERS) ? g_docIds[i] : String();
 }

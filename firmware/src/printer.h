@@ -51,12 +51,6 @@ struct PrinterCfg {
     // subscription and refuses the commands that set a tray, so a slot on such
     // a printer can be shown and must not be offered as something to write.
     bool   cloud = false;
-    // The printer's own document id in the TigerTag account, e.g.
-    // "cloud_00M09A322200726". The device does not use it to talk to the
-    // printer - it publishes it, so Studio can tell which TigerSpool is in
-    // front of which printer. Empty until the first account sync of a device
-    // updated from a firmware that did not keep it.
-    String docId;
     String devId;       // Anycubic: 32-hex broker device id, part of its topics
     String user;        // Anycubic: broker username
     String model;       // Anycubic: numeric model id, also part of its topics

@@ -477,18 +477,7 @@ static void loadCfg() {
         snprintf(k, sizeof(k), "p%dk", i); printers[i].cloud = nvs.getBool(k, false);
         snprintf(k, sizeof(k), "p%dv", i); printers[i].visible = nvs.getBool(k, true);
     }
-    // The account document ids, positional, newline-separated in one key - see
-    // the sync's own note on why they are not twenty-four keys.
-    {
-        const String ids = nvs.getString("pids", "");
-        int at = 0;
-        for (int i = 0; i < MAX_PRINTERS && at <= (int)ids.length(); i++) {
-            const int nl = ids.indexOf('\n', at);
-            if (nl < 0) break;
-            printers[i].docId = ids.substring(at, nl);
-            at = nl + 1;
-        }
-    }
+
     String oldK2 = nvs.getString("k2ip", "");
     nvs.end();
 
@@ -1050,6 +1039,15 @@ static void tickLink(Link& l) {
         return;
     }
 
+    // NOT while somebody is using the screen.
+    //
+    // begin() opens a socket, and a TLS handshake on this loop blocks it for
+    // more than a second. The loop is also what reads the back chevron and
+    // every other tap, so a dial started in the moment after a press is a
+    // press that appears to do nothing. Navigation comes first; a printer that
+    // has been off for a minute can wait another half second.
+    if (lvgl_port::sinceTouchMs() < 600) return;
+
     // Wait for the slot rather than spending an attempt without dialling.
     const int me = (int)(&l - links);
     if (s_dialer >= 0 && s_dialer != me) return;
@@ -1551,6 +1549,10 @@ static void presenceTick() {
     const uint32_t every = lvgl_port::asleep() ? 300000UL : 30000UL;
     if (!presenceForce && presenceAt && millis() - presenceAt < every) return;
 
+    // Nor while somebody is using the screen - same reason as the dialler: this
+    // is a blocking HTTPS round trip on the loop that answers taps.
+    if (lvgl_port::sinceTouchMs() < 600) return;
+
     // No room for a handshake: skip this beat rather than fail it. The next
     // one is thirty seconds away and the heap moves constantly.
     if (ESP.getMaxAllocHeap() < 24000) { presenceAt = millis(); return; }
@@ -1574,7 +1576,8 @@ static void presenceTick() {
     for (int i = 0; i < MAX_PRINTERS; i++) {
         if (printers[i].type == PT_NONE || !printers[i].visible) continue;
         active++;
-        if (printers[i].docId.length()) ids[nIds++] = printers[i].docId;
+        const String id = ttcloud::printerDocId(i);
+        if (id.length()) ids[nIds++] = id;
     }
     p.printersActive = active;
     p.printerIds     = ids;
@@ -2428,7 +2431,9 @@ void loop() {
         menu.latest          = ota::latestVersion();
         // -1 on a board with no cell on the connector, which is what takes the
         // row off the menu rather than showing an empty one.
-        menu.batteryPct      = battery::present() ? battery::percent() : -1;
+        // Always on the menu now: it is where a battery is declared, so hiding
+        // it when there is none hides the only way to say there is one.
+        menu.batteryPct      = battery::declared() ? battery::percent() : -2;
         menu.batteryCharging = battery::present() && battery::charging();
         screen_settings::showMenu(menu);
         lvgl_port::loop();
@@ -2712,8 +2717,19 @@ void loop() {
     }
 
     case ST_SET_BATTERY: {
+        // The declaration is taken BEFORE the screen is drawn. Taken after, the
+        // first draw of the pass still carried the old answer, so the view
+        // flipped back for one frame before flipping again.
+        {
+            const int d = screen_settings::takeBatteryDeclare();
+            if (d >= 0) {
+                battery::declare(d == 1);
+                presenceForce = true;   // Studio should hear about it at once
+            }
+        }
         screen_settings::showBattery(battery::volts(), battery::percent(),
-                                     battery::charging(), battery::minutesLeft());
+                                     battery::charging(), battery::minutesLeft(),
+                                     battery::declared());
         lvgl_port::loop();
         if (screen_settings::takeBack()) {
             screen_settings::invalidate();

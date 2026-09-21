@@ -90,9 +90,16 @@ heartbeat must never trample it.
 | `last_used_at` | server timestamp, written on the beat after a spool is sent |
 
 `printer_ids` is what lets Studio put the right TigerSpool next to the right
-printer. The ids come from the account import and are kept in NVS as one
-newline-separated key; a device updated from a firmware that did not keep them
-publishes an empty array until its first sync, which is minutes away at worst.
+printer. The ids come from the account import and are held **in RAM only**, so
+a freshly booted device publishes an empty array until its first sync of the
+boot - a minute or two.
+
+They are not in NVS because they no longer fit. The partition is 20 KB, frozen,
+and cannot grow over the air; it sits at 500 of 630 entries, and `putString`
+refused a 361-byte value outright - NVS wants a blob's entries contiguous
+inside one page, and there is no run that long left. Per-printer keys would fit
+today and cost forty of the hundred and thirty entries that remain. The account
+can always resend the ids; the flash cannot be given back.
 
 ### Three rules that are not decoration
 
@@ -138,10 +145,14 @@ memory problem - mbedTLS wants a contiguous block of internal RAM - so a beat
 is skipped when the largest free block is under 24 KB, and skipped entirely
 while the account sync is running. One TLS session at a time.
 
-`power_source` is inferred, not read. This board has no USB-detect line: with
-no cell there is nothing else it could be running on, and with one, the charger
-holding the rail up is the only evidence available. Studio should treat it as
-a hint and `battery_present` / `battery_percent` as the facts.
+`battery_present` is what the OWNER declared in Settings, not a measurement.
+The board cannot detect a cell - see `battery.cpp` in CODEMAP.md for the two
+signals that were tried and how each of them lied - so the device asks instead
+of guessing. Until someone answers, it reports no battery and `battery_percent`
+and `is_charging` are null.
+
+`power_source` is inferred from that declaration and the charging state, not
+read from a pin. Treat it as a hint.
 
 ---
 

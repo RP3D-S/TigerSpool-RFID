@@ -20,10 +20,20 @@ void begin();
 // Call from the main loop. Cheap: it samples on its own schedule.
 void loop();
 
-// True once the pin has read a plausible cell voltage for long enough to be
-// believed - see PRESENT_V in the source. False on a board with no battery,
-// which is what hides the battery row in Settings.
+// Is there a cell on the connector? The USER says so - see declare().
+//
+// It is not detected any more, because it cannot be. The board has no sense
+// line for it, and both indirect signals were measured wrong on real hardware:
+// the rail with an empty connector sits anywhere from 4.05 to 4.27 V depending
+// on the board, and the charger's ripple - which a healthy cell damps - is not
+// damped by a tired one. One of our two boards reported a battery it did not
+// have; the other denied the pack it was running on. A guess that confident is
+// worse than a question.
 bool present();
+
+// What the user declared, kept in NVS. `present()` is this, and nothing else.
+bool declared();
+void declare(bool yes);
 
 // The last reading, in volts, and the raw ADC millivolts behind it. The raw
 // value is what a bench measurement is compared against; the volts are what a

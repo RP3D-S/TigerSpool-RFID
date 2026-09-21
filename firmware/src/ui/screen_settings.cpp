@@ -91,8 +91,48 @@ void onReload(lv_event_t*) { s_reload = true; }
 
 // Which of the two is showing. Written into widgets that are already there:
 // the header is never rebuilt to change this.
+// Only on a CHANGE. lv_obj_add_flag invalidates the object whenever HIDDEN is
+// in the mask - hiding what is already hidden counts - and this is called on
+// every pass of the loop, so the screen repainted at frame rate to keep an
+// icon exactly as it was. The cache is cleared with the two pointers, which
+// are nulled whenever the screen is rebuilt.
+// The user's answer to "is there a battery in this box", taken by main.cpp.
+volatile int s_battDeclare = -1;      // -1 nothing, 0 no battery, 1 battery
+lv_obj_t*    s_battSw      = nullptr; // so the press can move it immediately
+
+// Flip the switch HERE, then report the press.
+//
+// The state itself is main.cpp's to change, and main.cpp is a loop that can be
+// a second deep in a TLS handshake to a printer when the finger lands. Waiting
+// for it to come back before the switch moves is a control that ignores you
+// and then agrees a second later - which is how somebody presses it twice.
+// The printer list has flipped its own switches on the spot for this reason
+// since the day it was written.
+void declareTap(bool yes) {
+    if (s_battSw) {
+        if (yes) lv_obj_add_state(s_battSw, LV_STATE_CHECKED);
+        else     lv_obj_clear_state(s_battSw, LV_STATE_CHECKED);
+    }
+    s_battDeclare = yes ? 1 : 0;
+    // The CONTENT is main.cpp's to redraw, not this callback's.
+    //
+    // It was rebuilt here for a while, deferred through lv_async_call so it
+    // would not delete the object being pressed. That fixed the delay and
+    // broke something worse: the view was then drawn by the interface task
+    // while the state machine believed it was somewhere else, so the back
+    // chevron set its flag and nobody read it - a screen that answers nothing,
+    // on a device that is running perfectly. main.cpp owns what is on screen;
+    // this reports a press and stops there.
+}
+void onBattAdd(lv_event_t*)  { declareTap(true); }
+void onBattGone(lv_event_t*) { declareTap(false); }
+
 void setReloadBusy(bool busy) {
     if (!s_reloadIcon || !s_reloadSpin) return;
+    static const void* forObj = nullptr;
+    static bool wasBusy = false;
+    if (forObj == s_reloadIcon && busy == wasBusy) return;
+    forObj = s_reloadIcon; wasBusy = busy;
     if (busy) {
         lv_obj_add_flag(s_reloadIcon, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(s_reloadSpin, LV_OBJ_FLAG_HIDDEN);
@@ -147,6 +187,7 @@ void invalidate() {
     // the pointers it cached - clearing the owner is what makes that true
     // rather than merely likely.
     s_viewOwner = nullptr; s_viewSig = 0;
+    s_battSw = nullptr;
 }
 
 // The four rows whose value and colour a background sync can change. The menu
@@ -181,6 +222,9 @@ void showMenu(const MenuState& st) {
     // it no longer jumps when the cable goes in - and the bolt is how someone
     // knows which of the two states they are reading.
     char battVal[24] = "";
+    // Nothing declared: the row carries no value at all. "No battery declared"
+    // does not fit the value column - it truncated the ROW'S OWN LABEL to
+    // "Batte..." - and the screen behind the row says it in full anyway.
     if (st.batteryPct >= 0)
         snprintf(battVal, sizeof(battVal), st.batteryCharging ? "%d%% " LV_SYMBOL_CHARGE : "%d%%",
                  st.batteryPct);
@@ -244,7 +288,9 @@ void showMenu(const MenuState& st) {
           icons::ERASE,   theme::DANGER },
     };
     for (auto& r : rows) {
-        if (r.id == E_BATTERY && st.batteryPct < 0) continue;
+        // -2 means "no battery declared": the row stays, because it is the
+        // only way in to declare one. -1 is not used any more.
+        if (r.id == E_BATTERY && st.batteryPct == -1) continue;
         lv_obj_t* row = frame::row(body, r.label, r.value, true, onEntry,
                                    (void*)(intptr_t)r.id, r.icon, r.tint);
 
@@ -268,6 +314,7 @@ void showMenu(const MenuState& st) {
 }
 
 Entry takeEntry() { Entry v = s_entry; s_entry = E_NONE; return v; }
+int  takeBatteryDeclare() { int v = s_battDeclare; s_battDeclare = -1; return v; }
 bool  takeBack()  { bool v = s_back; s_back = false; return v; }
 bool  takeReload(){ bool v = s_reload; s_reload = false; return v; }
 bool  takeHex()   { bool v = s_hex;    s_hex = false;    return v; }
@@ -311,9 +358,22 @@ static void gauge(lv_obj_t* parent) {
 // while there is room, orange from 85%, red for the moment after a switch was
 // refused - with the reason in words, because a bar turning red on its own
 // explains nothing to somebody who only pressed a switch.
+// What the gauge is showing, so it is written only when it MOVES.
+//
+// `lv_label_set_text` invalidates the label whatever it is handed - the same
+// string included - so writing the percentage on every pass of the loop
+// repainted this whole screen about thirty times a second, for a number that
+// changes when somebody presses a switch. Measured with /screen.ver: 0 frames
+// a second on the home screen, 29 here, doing nothing.
+static int s_gShown = -1, s_gPct = -1, s_gRefused = -1;
+static void gaugeForget() { s_gShown = s_gPct = s_gRefused = -1; }
+
 static void updateGauge(uint16_t used, bool refused) {
     if (!s_gaugeBar) return;
     const uint16_t shown = used > budget::LOAD_SLOTS ? budget::LOAD_SLOTS : used;
+    const int pct = (int)((used * 100 + budget::LOAD_SLOTS / 2) / budget::LOAD_SLOTS);
+    if ((int)shown == s_gShown && pct == s_gPct && (int)refused == s_gRefused) return;
+    s_gShown = (int)shown; s_gPct = pct; s_gRefused = (int)refused;
     lv_bar_set_value(s_gaugeBar, shown, LV_ANIM_OFF);
     uint32_t col = theme::ACCENT;
     if (used * 100 >= budget::LOAD_SLOTS * 85) col = theme::WARN;
@@ -327,8 +387,7 @@ static void updateGauge(uint16_t used, bool refused) {
     // says that without asking them to know what the 150 is. The slot counts
     // stay in the log and in docs/CONNECTION-BUDGET.md.
     char b[16];
-    snprintf(b, sizeof(b), "%u%%",
-             (unsigned)((used * 100 + budget::LOAD_SLOTS / 2) / budget::LOAD_SLOTS));
+    snprintf(b, sizeof(b), "%d%%", pct);
     lv_label_set_text(s_gaugeVal, b);
     lv_obj_set_style_text_color(s_gaugeVal, lv_color_hex(refused ? theme::DANGER : theme::TEXT), 0);
 }
@@ -422,6 +481,7 @@ void showPrinters(const PrinterCfg* printers, int count, bool syncing,
     }
     s_pickSig = sig;
     s_reloadIcon = s_reloadSpin = nullptr;
+    gaugeForget();      // new labels: the cache describes the old ones
 
     lv_obj_t* body = frame::build(i18n::T(S_PRINTER), onBack);
 
@@ -513,6 +573,7 @@ void showChoosePrinters(const PrinterCfg* printers, int count, bool syncing,
         return;
     }
     s_chooseSig = sig;
+    gaugeForget();      // same labels, rebuilt: see updateGauge
 
     // No back chevron: this is a step, not a place, and the button below is
     // the way out of it.
@@ -1315,19 +1376,60 @@ static lv_obj_t* kvBig(lv_obj_t* parent, const char* k, const char* v, uint32_t 
     return val;
 }
 
-void showBattery(float volts, int pct, bool charging, int minutesLeft) {
+// The one control this screen really has: is a battery fitted, yes or no.
+// A switch, like the printers, rather than a sentence - the answer is binary
+// and the device cannot work it out for itself (see battery.h).
+static void declareRow(lv_obj_t* parent, bool on) {
+    lv_obj_t* row = frame::row(parent, i18n::T(S_BATTERY), nullptr, false,
+                               on ? onBattGone : onBattAdd, nullptr,
+                               icons::BATTERY, on ? theme::OK : theme::TEXT_DIM);
+    lv_obj_t* sw = lv_switch_create(row);
+    lv_obj_set_size(sw, 44, 24);
+    lv_obj_clear_flag(sw, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_color(sw, lv_color_hex(0x2A313B), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, lv_color_hex(theme::ACCENT),
+                              LV_PART_INDICATOR | LV_STATE_CHECKED);
+    if (on) lv_obj_add_state(sw, LV_STATE_CHECKED);
+    s_battSw = sw;
+}
+
+void showBattery(float volts, int pct, bool charging, int minutesLeft, bool declared) {
     lvgl_port::Lock lvglGuard;   // LVGL is not reentrant - see lvgl_port.h
+
+    // Nothing was fitted, so there is nothing to measure. The screen asks
+    // instead of guessing: this board has no sense line for a cell, and both
+    // indirect signals were measured wrong on real hardware - one of our two
+    // boards reported a battery it did not have, the other denied the pack it
+    // was running on.
+    if (!declared) {
+        const uint32_t sigNo = 0xBA000001u;
+        if (sameView((const void*)showBattery, sigNo) && s_bScreen == frame::screen()) return;
+        claimView((const void*)showBattery, sigNo);
+        lv_obj_t* body = frame::build(i18n::T(S_BATTERY), onBack);
+        lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START,
+                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+        // The switch is the FIRST thing on this screen in both states. It is
+        // the same control saying the same thing, and a control that sits in
+        // one place when it is on and another when it is off is two controls
+        // to the eye - and the second one has to be hunted for.
+        declareRow(body, false);
+        lv_obj_t* air0 = lv_obj_create(body);
+        lv_obj_remove_style_all(air0);
+        lv_obj_set_size(air0, 1, 28);
+        batteryGlyph(body, -1, false, theme::TEXT_DIM);
+        lv_obj_t* why = frame::caption(i18n::T(S_BATT_WHY), theme::TEXT_DIM);
+        lv_obj_set_style_text_font(why, &font_ui_12, 0);
+        lv_obj_set_style_pad_top(why, 18, 0);
+        s_bBig = s_bVolts = s_bTime = s_bFill = nullptr;
+        s_bScreen = frame::screen();
+        return;
+    }
+
     // The voltage moves every second by a millivolt or two, and a view that
-    // rebuilds on that flickers. Rounded to what is drawn - the level, the
-    // state, the voltage to the ten millivolts and the time to five minutes -
-    // so it rebuilds when something a reader would notice has changed.
-    // Only what changes the SHAPE of the screen is in the signature: whether
-    // it is charging, and whether there is a time to show. The numbers - the
-    // level, the time, the voltage - are written into the widgets that are
-    // already there. The voltage moves a millivolt a second, and with it in
-    // the signature this screen rebuilt itself once a second: the back arrow
-    // was destroyed under the finger pressing it, so going back took several
-    // tries and felt like a freeze.
+    // rebuilds on that flickers. Only what changes the SHAPE of the screen is
+    // in the signature - whether it is charging, and whether there is a time
+    // to show. The numbers are written into the widgets already there.
     const uint32_t sig = 0xBA000000u ^ (charging ? 0x8000u : 0u)
                        ^ (minutesLeft >= 0 ? 0x4000u : 0u);
     char t[16], v[16], m[16];
@@ -1352,12 +1454,22 @@ void showBattery(float volts, int pct, bool charging, int minutesLeft) {
     lv_obj_t* body = frame::build(i18n::T(S_BATTERY), onBack);
     lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+    // Scrolls, because the way to say the battery is gone lives at the foot of
+    // this screen and the facts above it already fill 320 px.
+    lv_obj_add_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(body, LV_DIR_VER);
+    theme::scrollbar(body);
 
     const bool low = !charging && pct >= 0 && pct <= 15;
     const uint32_t col = charging ? theme::WARN
                        : low      ? theme::DANGER
                        : pct <= 35 ? theme::WARN : theme::OK;
+
+    // The switch FIRST, not at the foot of the screen. Down there it sat below
+    // the fold, and every change of state - a cable in, a cable out - rebuilds
+    // this view and sends the scroll back to the top, so the control moved out
+    // from under the finger reaching for it.
+    declareRow(body, true);
 
     lv_obj_t* air = lv_obj_create(body);
     lv_obj_remove_style_all(air);
@@ -1391,6 +1503,10 @@ void showBattery(float volts, int pct, bool charging, int minutesLeft) {
                                                      : S_BATT_NOTE), theme::TEXT);
     lv_obj_set_style_text_font(note, &font_ui_12, 0);
     lv_obj_set_style_pad_top(note, 10, 0);
+
+    // Taking it out is the other half of putting it in: a declaration nobody
+    // can withdraw is a device that reports a battery for ever.
+
 }
 
 void showReaderHex(const TagInfo* tag) {

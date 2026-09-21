@@ -18,6 +18,61 @@ message, and reset it to this header.
 
 ## Unreleased
 
+## 2026-09-21 - the battery is declared, and the screen always answers (released in 1.66.0)
+
+### Changed
+
+- Battery detection removed entirely; `battery::declare()` / `declared()`
+  replace it, stored in NVS as `bdecl`, and `present()` is the declaration.
+  Benoit: "le plus simple est que l'utilisateur declare sa batterie ... pas
+  besoin de gerer ca par algorythme impreccis". The measurements that killed
+  the heuristics, both on the same board: a flat pack at 3.31 V rippled 6.0 mV
+  (read as "no cell"), and the same board with the pack REMOVED sat at 4.05 V
+  rippling 1.7 mV (read as "a cell"). The other board, empty, sits at 4.27 V
+  rippling 9 mV. No threshold separates those.
+  The Settings row is now always present - it is the only way in to declare -
+  and carries the percentage once declared. The switch sits at the TOP of the
+  battery screen: at the foot it was below the fold, and every change of state
+  rebuilds that view and resets the scroll, so the control moved out from under
+  the finger reaching for it. The switch also moves in its own event callback,
+  before main.cpp has decided anything: the loop can be a second deep in a TLS
+  handshake when the finger lands, and a control that agrees a second later is
+  one somebody presses twice. The printer list has done this since it was
+  written, and the rest of the view follows in the same frame through
+  `lv_async_call` - deferred, because rebuilding deletes the screen the
+  callback itself belongs to and LVGL walks back into that object when the
+  callback returns. Six toggles in a row, uptime 53 s -> 67 s: no reset.
+  Verified on the board: declare on -> 71% and the
+  measured view, declare off -> present=false, percent=-1.
+
+### Fixed
+
+- `screen_settings`: the printers view repainted at frame rate at rest. Found
+  by measuring `/screen.ver` while Benoit reported the screen "moving on its
+  own": 0 frames a second on the home screen, 29-55 on this one. `updateGauge`
+  rewrote both gauge labels every pass, and `setReloadBusy` re-applied the
+  HIDDEN flag every pass - LVGL invalidates on both regardless of whether
+  anything changed. Both are now guarded by a cache, cleared where the objects
+  are rebuilt (both the settings view and the first-boot chooser). 0 frames a
+  second at rest afterwards, verified on the board with the battery.
+- Battery presence: the ripple test is no longer asked below 4.15 V, where the
+  level already answers. Found with a real pack at 3.31 V on the second bench
+  board - ripple 6.0 mV, exactly RIPPLE_NONE_MV, so the device declared no cell
+  while running on one. Benoit confirmed the pack was nearly empty. After the
+  fix: "3.43 V is below the charger's own level - a cell is on the connector",
+  8%.
+- `printer_ids` published empty, always. Two faults, one on top of the other.
+  The ids were written to NVS and read back only when a sync reported a change,
+  so a sync that found the same printers left them in flash with nobody reading
+  them - and then the write itself turned out to fail: `putString` returned 0
+  for a 361-byte value with 130 free entries, because NVS wants a blob's
+  entries contiguous inside one page and this frozen 20 KB partition (500/630
+  used) has no run that long. They are kept in RAM now, refreshed by every
+  sync; `PrinterCfg::docId` and the `pids` key are gone. A booted device
+  publishes no ids until its first sync, which is a minute or two.
+  Verified on the bench: `[presence] 2 printer(s) active, 2 id(s):
+  4thj8F4g0SALP27GnrOm,t1nFx693oORWqjbd3ceD`.
+
 ## 2026-09-21 - the collection goes plural (released in 1.65.0)
 
 ### Changed

@@ -84,4 +84,14 @@ uint8_t backlight();
 void sleepTick(int timeoutSec, uint8_t awakeBrightness);
 bool asleep();
 
+// How long since the panel last reported a finger, in milliseconds.
+//
+// It exists so the rest of the firmware can KEEP OUT OF THE WAY. Somebody who
+// has just touched the screen is waiting for it to answer, and the main loop
+// is what answers - so anything on that loop that blocks for a second (a TLS
+// handshake to a printer, a heartbeat to the account) has no business starting
+// in the moment after a press. Navigation comes first; the network can wait
+// half a second.
+uint32_t sinceTouchMs();
+
 }  // namespace lvgl_port

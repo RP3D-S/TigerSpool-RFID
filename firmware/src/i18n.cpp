@@ -123,6 +123,7 @@ static const Row STR[S_COUNT] = {
 /* S_READ_PUT_SPOOL */ {{ "Put a spool", "Posez une bobine", "Spule auflegen", "Coloca una bobina", "Appoggia una bobina", "Poloz szpule", "Coloque uma bobina", "Coloque uma bobine", "请放置线盘" }},
 /* S_READ_ON_READER */ {{ "on the reader", "sur le lecteur", "auf den Leser", "en el lector", "sul lettore", "na czytniku", "no leitor", "no leitor", "在读取器上" }},
 /* S_DRYING         */ {{ "Drying", "Séchage", "Trocknung", "Secado", "Essiccazione", "Suszenie", "Secagem", "Secagem", "烘干" }},
+/* S_BATT_WHY       */ {{ "This board cannot detect it", "La carte ne sait pas la détecter", "Die Platine erkennt ihn nicht", "La placa no puede detectarla", "La scheda non puo rilevarla", "Plytka nie potrafi jej wykryc", "A placa nao consegue deteta-la", "A placa nao consegue deteta-la", "主板无法检测" }},
 /* S_SENT_TO_PRINTER*/ {{ "Sent to the printer", "Envoyé à l'imprimante", "An den Drucker gesendet", "Enviado a la impresora", "Inviato alla stampante", "Wyslano do drukarki", "Enviado para a impressora", "Enviado para a impressora", "已发送到打印机" }},
 /* S_INSERT_IN      */ {{ "Insert the spool in", "Insérez la bobine dans", "Spule einlegen in", "Inserta la bobina en", "Inserisci la bobina in", "Wloz szpule do", "Insira a bobina em", "Insira a bobine em", "请将线盘装入" }},
 /* S_WRITE_MODE     */ {{ "Write", "Écriture", "Schreiben", "Escritura", "Scrittura", "Zapis", "Escrita", "Escrita", "写入" }},

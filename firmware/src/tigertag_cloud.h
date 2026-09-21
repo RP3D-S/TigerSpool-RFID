@@ -99,6 +99,11 @@ namespace ttcloud {
     // online dot and a battery icon must not have to know which product they
     // are looking at. See docs/PRESENCE.md for the whole contract.
 
+    // A printer's own document id in the account, by position in printers[].
+    // Refreshed by every sync and kept in RAM only - the NVS partition is
+    // frozen and has no room for it; see the note in the sync.
+    String printerDocId(int i);
+
     // The device document id: the Wi-Fi MAC, lowercase hex, no separators.
     // It is the identity of this box in the account, so its FORMAT is frozen -
     // change it and every device already registered is orphaned under its old

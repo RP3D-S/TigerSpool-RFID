@@ -7,6 +7,45 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.66.0] - 2026-09-21
+
+### Changed
+
+- **The battery is declared, not detected.** A box does not know whether a cell
+  is on its connector: there is no sense line, the rail with an empty connector
+  reads anywhere from 4.05 to 4.27 V depending on the board, and the charger's
+  ripple - which a healthy cell damps - is not damped by a tired one. Both of
+  our boards proved it, in opposite directions: one reported a battery it did
+  not have, the other denied the pack it was running on, at 3.3 V, while
+  running on it. So Settings now has a Battery row on every device, with one
+  switch: yes or no. The level, the runtime and what the device tells the
+  account all follow that answer.
+- **Nothing that blocks starts in the half second after a touch.** Dialling a
+  printer and beating to the account both open a TLS session on the main loop,
+  and that loop is also what reads the back chevron: a handshake started the
+  moment a finger lands is a press that appears to do nothing. Navigation comes
+  first.
+
+### Fixed
+
+- **The screen could stop answering after a control redrew its own view.** A
+  finger stays on the glass for ten reads or so; a screen rebuilt while it is
+  down destroys the object LVGL believes is being pressed, and LVGL only clears
+  that pointer for the deleted object itself, never for its children. Every
+  later touch was then treated as a continuation of a press that no longer
+  existed. Any screen rebuild now cancels the press in flight.
+- **The printer list repainted the whole screen thirty to fifty times a
+  second, doing nothing.** Two updaters ran on every pass of the loop and wrote
+  what was already there: `lv_label_set_text` invalidates a label whatever it
+  is handed, and `lv_obj_add_flag` invalidates an object when HIDDEN is in the
+  mask even if it was already hidden. Both now write only on a change. Measured
+  with `/screen.ver`: 29-55 frames a second at rest before, 0 after.
+- `printer_ids` was always published empty, so Studio could not tell which
+  printers a TigerSpool stands in front of. They were written to a single NVS
+  key that the flash refused - 361 bytes, and this frozen 20 KB partition has
+  no contiguous run that long left - and read back only when a sync reported a
+  change. They are kept in RAM now, refreshed by every sync.
+
 ## [1.65.0] - 2026-09-21
 
 ### Changed

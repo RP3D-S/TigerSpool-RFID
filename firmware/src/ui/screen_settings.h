@@ -82,7 +82,12 @@ void showAccount(const char* email, int printers, bool linked);
 void showScreen(uint8_t brightness, int sleepSeconds, int rotation, bool autoRot);
 // What the battery is doing. `volts` is the cell, `pct` the estimate from it.
 // Reached only from the row that exists only when there is a cell.
-void showBattery(float volts, int pct, bool charging, int minutesLeft);
+// `declared` is whether the user has said there is a battery in the box. When
+// they have not, this screen asks instead of showing numbers it cannot stand
+// behind - see battery.h.
+void showBattery(float volts, int pct, bool charging, int minutesLeft, bool declared);
+// 1 the user says a battery is fitted, 0 that it is gone, -1 nothing pending.
+int  takeBatteryDeclare();
 int  takeBrightness();       // new percentage, or -1
 int  takeSleep();            // new timeout in seconds, or -1
 // 0 or 2 for a fixed orientation, AUTO_ROT to follow the accelerometer, or

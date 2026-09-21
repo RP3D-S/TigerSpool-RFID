@@ -108,6 +108,19 @@ lv_obj_t* build(const char* title, Callback onBack) {
     // Freeing the previous screen only after the new one is loaded: deleting a
     // screen LVGL is still showing takes the whole UI down with it.
     if (old) lv_obj_del(old);
+
+    // And drop any press still in flight.
+    //
+    // A finger stays on the glass for ten reads or so. A screen rebuilt while
+    // it is down - which is what happens when a control redraws the view it
+    // lives on - destroys the object LVGL believes is being pressed, and
+    // `lv_obj_del` only clears the input device's pointer when it is the
+    // deleted object ITSELF, never one of its children. The pointer is then
+    // dangling, every later touch is treated as a continuation of that press,
+    // and the screen stops answering: a freeze with a device that is otherwise
+    // running perfectly. Resetting here cancels a press whose target no longer
+    // exists, which is the truth of the situation.
+    lv_indev_reset(nullptr, nullptr);
     return s_body;
 }
 

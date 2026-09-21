@@ -424,9 +424,10 @@ namespace {
         else if (preview == "setwifi-none") screen_settings::showWifi("", "-",
                                                                   WiFi.macAddress().c_str(), false, 0, 0);
         else if (preview == "setacct")  screen_settings::showAccount("benoit@atome3d.com", 6, true);
-        else if (preview == "setbatt")  screen_settings::showBattery(3.86f, 74, false, 270);
-        else if (preview == "setcharge") screen_settings::showBattery(3.76f, 42, true, 95);
-        else if (preview == "setbattlow") screen_settings::showBattery(3.45f, 8, false, 25);
+        else if (preview == "setbatt")  screen_settings::showBattery(3.86f, 74, false, 270, true);
+        else if (preview == "setcharge") screen_settings::showBattery(3.76f, 42, true, 95, true);
+        else if (preview == "setbattlow") screen_settings::showBattery(3.45f, 8, false, 25, true);
+        else if (preview == "battnone") screen_settings::showBattery(4.05f, -1, false, -1, false);
         else if (preview == "setscreen") screen_settings::showScreen(80, 60, 2, false);
         // The state that cannot be reached on demand - the device is only ever
         // behind by accident - and the one whose layout is tightest.

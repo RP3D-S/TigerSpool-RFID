@@ -135,6 +135,7 @@ enum StrId : uint8_t {
     S_READ_PUT_SPOOL,
     S_READ_ON_READER,
     S_DRYING,
+    S_BATT_WHY,
     S_SENT_TO_PRINTER,
     S_INSERT_IN,
     S_WRITE_MODE,
