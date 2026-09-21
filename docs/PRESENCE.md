@@ -17,8 +17,12 @@ TigerScale V3 firmware.
 ## Where it writes
 
 ```
-users/{uid}/tigerspool/{mac}
+users/{uid}/tigerspools/{mac}
 ```
+
+The collection is **plural**, like every other collection of things under an
+account - `scales`, `printers`, `racks`. A user can own several TigerSpools and
+each writes its own document; nothing is shared between them.
 
 `{mac}` is the Wi-Fi MAC, lowercase hex, no separators, twelve characters -
 `ttcloud::deviceId()`. **The format is frozen.** It is the document id, so
@@ -35,7 +39,7 @@ Until the rules name this path, every beat comes back `403 PERMISSION_DENIED`
 and the device is invisible in Studio:
 
 ```
-match /users/{uid}/tigerspool/{deviceId} {
+match /users/{uid}/tigerspools/{deviceId} {
   allow read, write: if request.auth != null && request.auth.uid == uid;
 }
 ```
@@ -143,7 +147,7 @@ a hint and `battery_present` / `battery_percent` as the facts.
 
 ## Not done yet
 
-The command queue - `users/{uid}/tigerspool/{mac}/commands`, polled, with
+The command queue - `users/{uid}/tigerspools/{mac}/commands`, polled, with
 `pending → ack → in_progress → done | error` - is deliberately left for later.
 Presence is what Studio is built around; commands are additive and can land
 without changing anything written here.

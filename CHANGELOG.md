@@ -7,6 +7,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.65.0] - 2026-09-21
+
+### Changed
+
+- The device document moved to `users/{uid}/tigerspools/{mac}` - plural, like
+  every other collection of things under an account. 1.64.0 wrote the singular
+  for one release and never created a document anywhere, because the account's
+  rules refused every write, so there is nothing under the old name.
+
 ## [1.64.0] - 2026-09-21
 
 ### Added

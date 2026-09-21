@@ -18,6 +18,15 @@ message, and reset it to this header.
 
 ## Unreleased
 
+## 2026-09-21 - the collection goes plural (released in 1.65.0)
+
+### Changed
+
+- Presence writes to `tigerspools/` (plural). The Firebase side pointed out
+  that every account collection is plural - scales, printers, racks - and the
+  singular would have been the one exception. Free to change: 1.64.0's writes
+  were all refused, so no document exists under the old path.
+
 ## 2026-09-21 - the device declares itself (released in 1.64.0)
 
 ### Added

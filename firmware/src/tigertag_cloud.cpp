@@ -1061,7 +1061,7 @@ bool ttcloud::asyncTake(String& summary) {
 // ---------------------------------------------------------------------------
 //  Presence: the device's own document in the account.
 //
-//  users/{uid}/tigerspool/{mac}, one `documents:commit` per beat. The shape is
+//  users/{uid}/tigerspools/{mac}, one `documents:commit` per beat. The shape is
 //  the TigerScale's, deliberately - see docs/PRESENCE.md.
 // ---------------------------------------------------------------------------
 namespace {
@@ -1119,7 +1119,11 @@ bool ttcloud::heartbeat(const Presence& p, bool full, String& err) {
 
     const String base = String("https://firestore.googleapis.com/v1/projects/") + PROJECT +
                         "/databases/(default)/documents";
-    const String path = String("users/") + g_uid + "/tigerspool/" + macHex();
+    // PLURAL, like every other collection of things under users/{uid} -
+    // scales, printers, racks. It was singular for exactly one release, which
+    // never wrote a document anywhere: the account's rules refused all of them,
+    // so there is nothing under the old name to orphan.
+    const String path = String("users/") + g_uid + "/tigerspools/" + macHex();
 
     // display_name is READ before it is written, and only on a full beat.
     // Without this, a name somebody types in Studio lives until the next
