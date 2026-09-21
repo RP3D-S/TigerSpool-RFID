@@ -63,8 +63,13 @@ MIT licensed. Built with PlatformIO for the ESP32-S3.
 Your printer already has a slot list. Your filament already carries its own
 identity. TigerSpool is the thirty centimetres between them.
 
-- **Tap, pick, done.** Hold the spool to the box, tap a slot, confirm. The
-  assignment reaches the printer over its own protocol.
+- **Tap a slot, present the spool, done.** There is nothing to confirm: the
+  assignment leaves for the printer as soon as the tag is read, over the
+  printer's own protocol, and the box tells you which slot to load.
+- **Scan mode: what is this spool?** Put one on the reader and the box shows
+  what the chip holds - colour, material, brand, the two temperature windows,
+  the drying instruction, what is left on it, and whether the tag is certified.
+  No printer involved.
 - **Your printers come from your account.** They are configured once, in Tiger
   Studio Manager, and every TigerSpool you own reads the same list.
 - **It speaks nine languages** - English, French, German, Spanish, Italian,
@@ -135,7 +140,13 @@ failing quietly.
 3. **Sign in.** E-mail and password, or Google through a second QR code.
 4. **Your printers arrive.** From your account, as configured in Tiger Studio.
 
-Then hold a tagged spool against the box, tap the slot you want, and confirm.
+Then tap the slot you want and hold a tagged spool against the box. It is sent
+to the printer as soon as it is read - there is nothing to confirm - and the
+box then tells you where to put it.
+
+That last part is the one people miss: **it tells the printer what the spool
+is, it does not load it.** Putting the spool in that slot - the CFS, the AMS,
+the ACE unit, whatever your printer calls its tray - is still yours to do.
 
 From then on it updates itself over the air.
 
@@ -258,6 +269,7 @@ for 160, and what the budget does not account for are in
 | [OTA.md](docs/OTA.md) | Partitions, the manifest, and what is settled before the first release |
 | [PRINTER-COMPATIBILITY.md](docs/PRINTER-COMPATIBILITY.md) | Per-brand status and slot naming |
 | [CONNECTION-BUDGET.md](docs/CONNECTION-BUDGET.md) | How many printers at once: load slots, every measurement behind them, why 160 |
+| [PRESENCE.md](docs/PRESENCE.md) | How a box declares itself to the account, so Tiger Studio can list it |
 | [WIRING.md](docs/WIRING.md) | The four wires |
 | [ROADMAP.md](docs/ROADMAP.md) | What is deliberately not done yet, and what has to be decided first |
 
@@ -277,6 +289,10 @@ Written down rather than discovered.
   chip's internal RAM, and the load budget enforces it; see
   [docs/CONNECTION-BUDGET.md](docs/CONNECTION-BUDGET.md). The two ways past it
   are in [docs/ROADMAP.md](docs/ROADMAP.md).
+- **A battery has to be declared, in Settings.** The board has no way to tell
+  whether a cell is on its connector - no sense line, and the two indirect
+  signals were each measured wrong on real hardware - so it asks instead of
+  guessing. Until someone answers, it reports no battery.
 - **Anycubic in cloud mode is not supported**, only LAN mode.
 - **A printer is identified by its position in your account's list.** Reordering
   it in Tiger Studio can move a per-printer setting to the wrong machine. Tracked
